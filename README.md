@@ -55,6 +55,7 @@ Use your plugin manager:
 - `:JlsInfo` – show resolved root and command
 - `:JlsCacheClear` – delete workspace cache under `~/.cache/jls/`
 - `:JlsLogs` – open Neovim LSP log
+- `:JlsSnacks` – open a Snacks picker with JLS actions
 
 ## Configuration
 
@@ -107,4 +108,5 @@ require("lualine").setup({
 
 - If `cmd` is not set, the plugin resolves the launcher using `jls_dir`, `JLS_HOME`, or `JLS_DIR`.
 - JLS runtime selection follows the server’s default behavior (`JAVA_HOME`, `~/.config/jls/runtimes.json`).
+- Notifications use `vim.notify`, so Noice will automatically render them if installed.
 - For Lombok compilation issues, ensure Maven is configured to run annotation processors.

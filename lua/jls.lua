@@ -154,6 +154,13 @@ local function build_env(cfg)
   return env
 end
 
+local function notify(msg, level)
+  local ok = pcall(vim.notify, msg, level or vim.log.levels.INFO, { title = "jls" })
+  if not ok then
+    pcall(vim.notify, msg, level or vim.log.levels.INFO)
+  end
+end
+
 
 local function get_clients_by_name(name)
   if vim.lsp.get_clients then
@@ -185,6 +192,30 @@ local function statusline_text()
   return "[JLS] " .. status_state.message
 end
 
+local function wait_for_attach(cb)
+  local group = vim.api.nvim_create_augroup("JlsAttachOnce", { clear = true })
+  vim.api.nvim_create_autocmd("LspAttach", {
+    group = group,
+    callback = function(args)
+      local client = vim.lsp.get_client_by_id(args.data.client_id)
+      if client and client.name == "jls" then
+        vim.api.nvim_del_augroup_by_id(group)
+        cb(true, client)
+      end
+    end,
+    once = true,
+  })
+
+  vim.defer_fn(function()
+    local ok, ac = pcall(vim.api.nvim_get_autocmds, { group = group })
+    if not ok or not ac or #ac == 0 then
+      return
+    end
+    pcall(vim.api.nvim_del_augroup_by_id, group)
+    cb(false, nil)
+  end, 30000)
+end
+
 ---@param opts JlsConfig|nil
 ---@return table|nil
 ---@return string|nil
@@ -212,10 +243,11 @@ end
 function M.start(opts)
   local lsp_config, err = M.make_lsp_config(opts)
   if not lsp_config then
-    vim.notify(err or "JLS configuration failed", vim.log.levels.ERROR)
+    notify(err or "JLS configuration failed", vim.log.levels.ERROR)
     return
   end
 
+  notify("JLS: starting...", vim.log.levels.INFO)
   local ok, lspconfig = pcall(require, "lspconfig")
   local ok_configs, configs = pcall(require, "lspconfig.configs")
   if ok and ok_configs and configs and configs.jls then
@@ -229,16 +261,32 @@ function M.start(opts)
     end
     vim.lsp.start(lsp_config)
   end
+
+  wait_for_attach(function(ok)
+    if ok then
+      notify("JLS: started", vim.log.levels.INFO)
+    else
+      notify("JLS: start timed out (no attach)", vim.log.levels.WARN)
+    end
+  end)
 end
 
 function M.stop()
-  for _, client in ipairs(get_clients_by_name("jls")) do
+  local clients = get_clients_by_name("jls")
+  if #clients == 0 then
+    notify("JLS: no running clients", vim.log.levels.WARN)
+    return
+  end
+
+  for _, client in ipairs(clients) do
     client:stop(true)
   end
+  notify("JLS: stopped (" .. #clients .. " client)", vim.log.levels.INFO)
 end
 
 ---@param opts JlsConfig|nil
 function M.restart(opts)
+  notify("JLS: restarting...", vim.log.levels.INFO)
   M.stop()
   M.start(opts)
 end
@@ -259,7 +307,7 @@ function M.info()
   local cfg = vim.tbl_deep_extend("force", default_config(), M.config)
   local cmd, err = build_cmd(cfg)
   if not cmd then
-    vim.notify(err or "JLS command resolution failed", vim.log.levels.ERROR)
+    notify(err or "JLS command resolution failed", vim.log.levels.ERROR)
     return
   end
 
@@ -269,7 +317,7 @@ function M.info()
     "root: " .. root,
     "cmd: " .. table.concat(cmd, " "),
   }
-  vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
+  notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
 
@@ -278,23 +326,51 @@ function M.cache_clear()
   local root = resolve_root(vim.api.nvim_buf_get_name(0), cfg)
   local dir = cache_dir(root)
   if vim.fn.isdirectory(dir) == 0 then
-    vim.notify("JLS cache not found: " .. dir, vim.log.levels.INFO)
+    notify("JLS cache not found: " .. dir, vim.log.levels.INFO)
     return
   end
   if remove_dir(dir) then
-    vim.notify("JLS cache removed: " .. dir, vim.log.levels.INFO)
+    notify("JLS cache removed: " .. dir, vim.log.levels.INFO)
   else
-    vim.notify("Failed to remove JLS cache: " .. dir, vim.log.levels.ERROR)
+    notify("Failed to remove JLS cache: " .. dir, vim.log.levels.ERROR)
   end
 end
 
 function M.logs()
   local log_path = vim.lsp.get_log_path()
   if vim.fn.filereadable(log_path) == 0 then
-    vim.notify("LSP log not found: " .. log_path, vim.log.levels.WARN)
+    notify("LSP log not found: " .. log_path, vim.log.levels.WARN)
     return
   end
   vim.cmd("split " .. vim.fn.fnameescape(log_path))
+end
+
+function M.snacks_picker()
+  local ok, Snacks = pcall(require, "snacks")
+  if not ok or not Snacks.picker or not Snacks.picker.select then
+    notify("Snacks picker not available", vim.log.levels.WARN)
+    return
+  end
+
+  local actions = {
+    { label = "JLS: Start", fn = function() M.start() end },
+    { label = "JLS: Restart", fn = function() M.restart() end },
+    { label = "JLS: Stop", fn = function() M.stop() end },
+    { label = "JLS: Info", fn = function() M.info() end },
+    { label = "JLS: Cache Clear", fn = function() M.cache_clear() end },
+    { label = "JLS: Logs", fn = function() M.logs() end },
+  }
+
+  Snacks.picker.select(actions, {
+    prompt = "JLS",
+    format_item = function(item)
+      return item.label
+    end,
+  }, function(item)
+    if item and item.fn then
+      item.fn()
+    end
+  end)
 end
 
 function M.statusline()
