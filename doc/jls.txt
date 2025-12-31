@@ -1,0 +1,95 @@
+*jls.txt*  Neovim integration for JLS
+
+*jls*
+
+INTRODUCTION~
+
+*jls-introduction*
+
+nvim-jls provides a clean, batteries-included Neovim setup for JLS (Java Language
+Server), with OS-aware launcher resolution, Lombok wiring, stable root detection,
+commands, and status reporting.
+
+REQUIREMENTS~
+
+*jls-requirements*
+
+- Neovim 0.9+ (0.10+ recommended)
+- JLS installed locally with a dist/ folder
+- Optional: nvim-lspconfig
+
+SETUP~
+
+*jls-setup*
+
+>
+  require("jls").setup({
+    jls_dir = "/path/to/jls",
+    lombok = { path = "/path/to/lombok.jar" },
+  })
+<
+
+COMMANDS~
+
+*jls-commands*
+
+:JlsStart       Start JLS for the current buffer.
+:JlsRestart     Restart JLS.
+:JlsStop        Stop all running JLS clients.
+:JlsInfo        Show resolved root and command.
+:JlsCacheClear  Remove JLS workspace cache under ~/.cache/jls/.
+:JlsLogs        Open Neovim LSP log.
+
+CONFIGURATION~
+
+*jls-configuration*
+
+>
+  require("jls").setup({
+    cmd = nil,
+    jls_dir = nil,
+    filetypes = { "java" },
+    root_markers = {
+      "pom.xml",
+      "build.gradle",
+      "build.gradle.kts",
+      "settings.gradle",
+      "settings.gradle.kts",
+      "WORKSPACE",
+      "WORKSPACE.bazel",
+      ".java-version",
+      ".git",
+    },
+    settings = {},
+    init_options = {},
+    env = {},
+    java_home = nil,
+    lombok = { path = nil, javaagent = nil },
+    extra_args = {},
+    auto_start = true,
+    status = { enable = true, notify = false },
+  })
+<
+
+STATUSLINE~
+
+*jls-statusline*
+
+>
+  require("lualine").setup({
+    sections = {
+      lualine_c = { function() return require("jls").statusline() end },
+    },
+  })
+<
+
+NOTES~
+
+*jls-notes*
+
+- If cmd is not set, the plugin resolves the launcher using jls_dir, JLS_HOME, or JLS_DIR.
+- JLS runtime selection follows JAVA_HOME or ~/.config/jls/runtimes.json.
+- For Lombok compilation issues, ensure Maven runs annotation processors.
+- JLS is not listed in nvim-lspconfig or mason yet due to the GitHub star threshold.
+  This plugin works with or without them and remains compatible if they add JLS later.
+
