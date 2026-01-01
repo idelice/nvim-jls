@@ -16,10 +16,6 @@ vim.api.nvim_create_user_command("JlsInfo", function()
   jls.info()
 end, {})
 
-vim.api.nvim_create_user_command("JlsSnacks", function()
-  jls.snacks_picker()
-end, {})
-
 vim.api.nvim_create_user_command("JlsCacheClear", function()
   jls.cache_clear()
 end, {})

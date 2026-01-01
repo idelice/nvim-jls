@@ -19,7 +19,6 @@ local uv = vim.loop
 ---@field java_home string|nil JAVA_HOME override
 ---@field lombok JlsLombokConfig
 ---@field extra_args string[]
----@field auto_start boolean
 ---@field status JlsStatusConfig
 
 ---@class JlsModule
@@ -41,13 +40,19 @@ local function default_config()
       ".java-version",
       ".git",
     },
-    settings = {},
+    settings = {
+      jls = {
+        features = {
+          inlayHints = true,
+          semanticTokens = true,
+        },
+      },
+    },
     init_options = {},
     env = {},
     java_home = nil,
     lombok = { path = nil, javaagent = nil },
     extra_args = {},
-    auto_start = true,
     status = { enable = true, notify = false },
   }
 end
@@ -247,6 +252,16 @@ function M.start(opts)
     return
   end
 
+  local root = lsp_config.root_dir
+  if type(root) == "function" then
+    root = root(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
+  end
+  for _, client in ipairs(get_clients_by_name("jls")) do
+    if client.config and client.config.root_dir == root then
+      return
+    end
+  end
+
   notify("JLS: starting...", vim.log.levels.INFO)
   local ok, lspconfig = pcall(require, "lspconfig")
   local ok_configs, configs = pcall(require, "lspconfig.configs")
@@ -345,34 +360,6 @@ function M.logs()
   vim.cmd("split " .. vim.fn.fnameescape(log_path))
 end
 
-function M.snacks_picker()
-  local ok, Snacks = pcall(require, "snacks")
-  if not ok or not Snacks.picker or not Snacks.picker.select then
-    notify("Snacks picker not available", vim.log.levels.WARN)
-    return
-  end
-
-  local actions = {
-    { label = "JLS: Start", fn = function() M.start() end },
-    { label = "JLS: Restart", fn = function() M.restart() end },
-    { label = "JLS: Stop", fn = function() M.stop() end },
-    { label = "JLS: Info", fn = function() M.info() end },
-    { label = "JLS: Cache Clear", fn = function() M.cache_clear() end },
-    { label = "JLS: Logs", fn = function() M.logs() end },
-  }
-
-  Snacks.picker.select(actions, {
-    prompt = "JLS",
-    format_item = function(item)
-      return item.label
-    end,
-  }, function(item)
-    if item and item.fn then
-      item.fn()
-    end
-  end)
-end
-
 function M.statusline()
   return statusline_text()
 end
@@ -402,16 +389,14 @@ function M.setup(args)
       end,
     })
   end
-  if M.config.auto_start then
-    local group = vim.api.nvim_create_augroup("JlsAutoStart", { clear = true })
-    vim.api.nvim_create_autocmd("FileType", {
-      group = group,
-      pattern = "java",
-      callback = function()
-        M.start()
-      end,
-    })
-  end
+  local group = vim.api.nvim_create_augroup("JlsAutoStart", { clear = true })
+  vim.api.nvim_create_autocmd("FileType", {
+    group = group,
+    pattern = "java",
+    callback = function()
+      M.start()
+    end,
+  })
 end
 
 return M

@@ -55,7 +55,6 @@ Use your plugin manager:
 - `:JlsInfo` – show resolved root and command
 - `:JlsCacheClear` – delete workspace cache under `~/.cache/jls/`
 - `:JlsLogs` – open Neovim LSP log
-- `:JlsSnacks` – open a Snacks picker with JLS actions
 
 ## Configuration
 
@@ -75,13 +74,19 @@ require("jls").setup({
     ".java-version",
     ".git",
   },
-  settings = {},                 -- LSP settings
+  settings = {                   -- LSP settings (sent via didChangeConfiguration)
+    jls = {
+      features = {
+        inlayHints = true,
+        semanticTokens = true,
+      },
+    },
+  },
   init_options = {},             -- LSP init options
   env = {},                      -- extra environment variables
   java_home = nil,               -- sets JAVA_HOME for the server
   lombok = { path = nil, javaagent = nil },
   extra_args = {},               -- extra args passed to JLS launcher
-  auto_start = true,             -- auto start on FileType=java
   status = { enable = true, notify = false }, -- progress status
 })
 ```
@@ -91,6 +96,48 @@ Notes on optional fields:
 - `cmd`: if omitted, the plugin builds a launcher command from `jls_dir`.
 - `jls_dir`: required only if you don't set `cmd` or `JLS_HOME`/`JLS_DIR`.
 - `java_home`: only set this if you want to override your shell's `JAVA_HOME`.
+- `settings`: forwarded to JLS as `workspace/didChangeConfiguration`. Use `settings.jls.*` keys (see examples below).
+- `init_options`: sent during LSP initialization. Use `init_options.jls.*` keys (see examples below).
+- `env`: extra environment variables for the JLS process.
+- `lombok.javaagent`: adds `-javaagent:/path/to/lombok.jar` when Lombok needs a Java agent instead of only `lombokPath`.
+- `extra_args`: raw args appended to the JLS launcher command.
+
+Examples:
+
+```lua
+settings = {
+  jls = {
+    diagnostics = {
+      enable = true,
+      unusedImports = "warning", -- "error" | "warning" | "off"
+    },
+    features = {
+      inlayHints = true,
+      semanticTokens = true,
+    },
+  },
+}
+```
+
+```lua
+init_options = {
+  jls = {
+    cache = {
+      dir = "/path/to/jls-cache",
+    },
+  },
+}
+```
+
+```lua
+env = {
+  JAVA_TOOL_OPTIONS = "-Xmx2g",
+}
+```
+
+```lua
+extra_args = { "-Xmx2g", "-Dhttps.proxyHost=proxy", "-Dhttps.proxyPort=8443" }
+```
 
 ## Statusline
 

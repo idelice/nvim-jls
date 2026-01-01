@@ -39,7 +39,6 @@ COMMANDS~
 :JlsInfo        Show resolved root and command.
 :JlsCacheClear  Remove JLS workspace cache under ~/.cache/jls/.
 :JlsLogs        Open Neovim LSP log.
-:JlsSnacks      Open a Snacks picker with JLS actions.
 
 CONFIGURATION~
 
@@ -61,13 +60,19 @@ CONFIGURATION~
       ".java-version",
       ".git",
     },
-    settings = {},
+    settings = {
+      jls = {
+        features = {
+          inlayHints = true,
+          semanticTokens = true,
+        },
+      },
+    },
     init_options = {},
     env = {},
     java_home = nil,
     lombok = { path = nil, javaagent = nil },
     extra_args = {},
-    auto_start = true,
     status = { enable = true, notify = false },
   })
 <
@@ -94,4 +99,3 @@ NOTES~
 - For Lombok compilation issues, ensure Maven runs annotation processors.
 - JLS is not listed in nvim-lspconfig or mason yet due to the GitHub star threshold.
   This plugin works with or without them and remains compatible if they add JLS later.
-
