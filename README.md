@@ -47,6 +47,8 @@ Use your plugin manager:
 }
 ```
 
+JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is only needed if you want to override defaults.
+
 ## Commands
 
 - `:JlsStart` – start JLS for the current buffer

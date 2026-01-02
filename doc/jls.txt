@@ -29,6 +29,9 @@ SETUP~
   })
 <
 
+JLS starts automatically on FileType=java via a filetype plugin. Use setup()
+only if you want to override defaults.
+
 COMMANDS~
 
 *jls-commands*

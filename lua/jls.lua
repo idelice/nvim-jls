@@ -389,14 +389,6 @@ function M.setup(args)
       end,
     })
   end
-  local group = vim.api.nvim_create_augroup("JlsAutoStart", { clear = true })
-  vim.api.nvim_create_autocmd("FileType", {
-    group = group,
-    pattern = "java",
-    callback = function()
-      M.start()
-    end,
-  })
 end
 
 return M
