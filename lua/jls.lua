@@ -21,6 +21,7 @@ local uv = vim.loop
 ---@field lombok JlsLombokConfig
 ---@field extra_args string[]
 ---@field status JlsStatusConfig
+---@field codelens { enable: boolean }
 
 ---@class JlsModule
 local M = {}
@@ -56,6 +57,7 @@ local function default_config()
     lombok = { path = nil, javaagent = nil, search_paths = nil },
     extra_args = {},
     status = { enable = true, notify = false },
+    codelens = { enable = false },
   }
 end
 
@@ -617,6 +619,46 @@ end
 ---@param args JlsConfig|nil
 function M.setup(args)
   M.config = vim.tbl_deep_extend("force", default_config(), M.config, args or {})
+
+  if M.config.codelens and M.config.codelens.enable then
+    local group = vim.api.nvim_create_augroup("JlsCodeLens", { clear = true })
+
+    local function has_jls(bufnr)
+      for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+        if client.name == "jls" then
+          return true
+        end
+      end
+      return false
+    end
+
+    local function refresh(bufnr)
+      if not has_jls(bufnr) then
+        return
+      end
+      if vim.lsp.codelens and vim.lsp.codelens.refresh then
+        vim.lsp.codelens.refresh({ bufnr = bufnr })
+      end
+    end
+
+    vim.api.nvim_create_autocmd("LspAttach", {
+      group = group,
+      callback = function(ev)
+        if ev.buf and vim.bo[ev.buf].filetype == "java" then
+          refresh(ev.buf)
+        end
+      end,
+    })
+
+    vim.api.nvim_create_autocmd({ "BufEnter" }, {
+      group = group,
+      callback = function(ev)
+        if ev.buf and vim.bo[ev.buf].filetype == "java" then
+          refresh(ev.buf)
+        end
+      end,
+    })
+  end
 
 
   if M.config.status and M.config.status.enable then

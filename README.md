@@ -93,6 +93,7 @@ require("jls").setup({
   -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
   extra_args = {},               -- extra args passed to JLS launcher
   status = { enable = true, notify = false }, -- progress status
+  codelens = { enable = false }, -- auto-refresh codelens on BufEnter
 })
 ```
 
@@ -108,6 +109,7 @@ Notes on optional fields:
 - `lombok.javaagent`: adds `-javaagent:/path/to/lombok.jar` when Lombok needs a Java agent instead of only `lombokPath`.
 - `lombok.search_paths`: optional list of paths or globs to search for Lombok (used if `lombok.path` is not set).
 - `extra_args`: raw args appended to the JLS launcher command.
+- `codelens.enable`: toggles codelens auto-refresh on `BufEnter`.
 
 Examples:
 
