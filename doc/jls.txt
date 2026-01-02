@@ -80,6 +80,7 @@ CONFIGURATION~
     -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
     extra_args = {},
     status = { enable = true, notify = false },
+    codelens = { enable = false },
   })
 <
 
@@ -106,3 +107,4 @@ NOTES~
 - JLS is not listed in nvim-lspconfig or mason yet due to the GitHub star threshold.
   This plugin works with or without them and remains compatible if they add JLS later.
 - nvim-jls caches resolved config per workspace under ~/.cache/nvim-jls/<workspace>/config.json.
+- codelens.enable toggles auto-refresh on BufEnter.
