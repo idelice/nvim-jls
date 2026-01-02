@@ -8,7 +8,7 @@ JLS can run as a raw LSP server, but configuring it correctly is the hard part. 
 
 - OS‑aware launcher resolution (`dist/lang_server_{linux|mac|windows}`)
 - Stable root detection for Maven/Gradle/Bazel projects
-- Lombok support via `-Dorg.javacs.lombokPath` or `-javaagent`
+- Lombok support via `-Dorg.javacs.lombokPath` or `-javaagent` (manual jar path optional; auto-detected)
 - Built‑in commands and status reporting
 
 ## Requirements
@@ -40,7 +40,7 @@ Use your plugin manager:
   opts = {
     jls_dir = "/path/to/jls", -- must contain dist/lang_server_*.sh
     lombok = {
-      path = "/path/to/lombok.jar",
+      -- path = "/path/to/lombok.jar", -- optional (auto-detected if present)
       -- javaagent = "/path/to/lombok.jar", -- optional
     },
   },
@@ -104,8 +104,9 @@ Notes on optional fields:
 - `settings`: forwarded to JLS as `workspace/didChangeConfiguration`. Use `settings.jls.*` keys (see examples below).
 - `init_options`: sent during LSP initialization. Use `init_options.jls.*` keys (see examples below).
 - `env`: extra environment variables for the JLS process.
+- `lombok.path`: optional. If omitted, the plugin tries to auto-detect Lombok from `~/.m2` first, then from any `lombok.search_paths`.
 - `lombok.javaagent`: adds `-javaagent:/path/to/lombok.jar` when Lombok needs a Java agent instead of only `lombokPath`.
-- `lombok.search_paths`: optional list of paths or globs to search for Lombok.
+- `lombok.search_paths`: optional list of paths or globs to search for Lombok (used if `lombok.path` is not set).
 - `extra_args`: raw args appended to the JLS launcher command.
 
 Examples:
