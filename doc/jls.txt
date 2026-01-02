@@ -40,7 +40,9 @@ COMMANDS~
 :JlsRestart     Restart JLS.
 :JlsStop        Stop all running JLS clients.
 :JlsInfo        Show resolved root and command.
+:JlsDoctor      Show effective config and diagnostics.
 :JlsCacheClear  Remove JLS workspace cache under ~/.cache/jls/.
+:JlsCacheClearRestart  Clear cache and restart JLS.
 :JlsLogs        Open Neovim LSP log.
 
 CONFIGURATION~
@@ -75,6 +77,7 @@ CONFIGURATION~
     env = {},
     java_home = nil,
     lombok = { path = nil, javaagent = nil },
+    -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
     extra_args = {},
     status = { enable = true, notify = false },
   })
@@ -102,3 +105,4 @@ NOTES~
 - For Lombok compilation issues, ensure Maven runs annotation processors.
 - JLS is not listed in nvim-lspconfig or mason yet due to the GitHub star threshold.
   This plugin works with or without them and remains compatible if they add JLS later.
+- nvim-jls caches resolved config per workspace under ~/.cache/nvim-jls/<workspace>/config.json.

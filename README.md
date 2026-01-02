@@ -55,7 +55,9 @@ JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is 
 - `:JlsRestart` – restart JLS
 - `:JlsStop` – stop all JLS clients
 - `:JlsInfo` – show resolved root and command
+- `:JlsDoctor` – show effective config and diagnostics
 - `:JlsCacheClear` – delete workspace cache under `~/.cache/jls/`
+- `:JlsCacheClearRestart` – clear cache and restart JLS
 - `:JlsLogs` – open Neovim LSP log
 
 ## Configuration
@@ -88,6 +90,7 @@ require("jls").setup({
   env = {},                      -- extra environment variables
   java_home = nil,               -- sets JAVA_HOME for the server
   lombok = { path = nil, javaagent = nil },
+  -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
   extra_args = {},               -- extra args passed to JLS launcher
   status = { enable = true, notify = false }, -- progress status
 })
@@ -102,6 +105,7 @@ Notes on optional fields:
 - `init_options`: sent during LSP initialization. Use `init_options.jls.*` keys (see examples below).
 - `env`: extra environment variables for the JLS process.
 - `lombok.javaagent`: adds `-javaagent:/path/to/lombok.jar` when Lombok needs a Java agent instead of only `lombokPath`.
+- `lombok.search_paths`: optional list of paths or globs to search for Lombok.
 - `extra_args`: raw args appended to the JLS launcher command.
 
 Examples:
@@ -159,3 +163,4 @@ require("lualine").setup({
 - JLS runtime selection follows the server’s default behavior (`JAVA_HOME`, `~/.config/jls/runtimes.json`).
 - Notifications use `vim.notify`, so Noice will automatically render them if installed.
 - For Lombok compilation issues, ensure Maven is configured to run annotation processors.
+- nvim-jls caches resolved config per workspace under `~/.cache/nvim-jls/<workspace>/config.json`.

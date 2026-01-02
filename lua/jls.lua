@@ -3,6 +3,7 @@ local uv = vim.loop
 ---@class JlsLombokConfig
 ---@field path string|nil Path to lombok.jar
 ---@field javaagent string|nil Path to lombok javaagent jar
+---@field search_paths string[]|nil Extra paths/globs to search for lombok.jar
 
 ---@class JlsStatusConfig
 ---@field enable boolean
@@ -24,6 +25,7 @@ local uv = vim.loop
 ---@class JlsModule
 local M = {}
 
+local warned_roots = {}
 local function default_config()
   return {
     cmd = nil,
@@ -51,7 +53,7 @@ local function default_config()
     init_options = {},
     env = {},
     java_home = nil,
-    lombok = { path = nil, javaagent = nil },
+    lombok = { path = nil, javaagent = nil, search_paths = nil },
     extra_args = {},
     status = { enable = true, notify = false },
   }
@@ -78,16 +80,17 @@ local function detect_os()
   end
 end
 
-local function resolve_root(fname, cfg)
+local function resolve_root_info(fname, cfg)
   local path = fname or vim.api.nvim_buf_get_name(0)
+  local cwd = vim.fn.getcwd()
   if path == "" then
-    return vim.fn.getcwd()
+    return cwd, true
   end
 
   if vim.fs and vim.fs.find then
     local found = vim.fs.find(cfg.root_markers, { path = path, upward = true })
     if found and found[1] then
-      return vim.fs.dirname(found[1])
+      return vim.fs.dirname(found[1]), false
     end
   end
 
@@ -95,11 +98,16 @@ local function resolve_root(fname, cfg)
   if ok then
     local root = util.root_pattern(unpack(cfg.root_markers))(path)
     if root then
-      return root
+      return root, false
     end
   end
 
-  return vim.fn.getcwd()
+  return cwd, true
+end
+
+local function resolve_root(fname, cfg)
+  local root = resolve_root_info(fname, cfg)
+  return root
 end
 
 local function resolve_launcher(cfg)
@@ -126,6 +134,150 @@ local function resolve_launcher(cfg)
   end
 
   return { launcher }
+end
+
+local function workspace_cache_root()
+  local cache_home = os.getenv("XDG_CACHE_HOME") or (os.getenv("HOME") .. "/.cache")
+  return joinpath(cache_home, "nvim-jls")
+end
+
+local function workspace_cache_dir(root)
+  local name = vim.fn.fnamemodify(root, ":t")
+  if name == nil or name == "" then
+    name = root:gsub("[/%s]", "_")
+  end
+  return joinpath(workspace_cache_root(), name)
+end
+
+local function workspace_cache_path(root)
+  return joinpath(workspace_cache_dir(root), "config.json")
+end
+
+local function read_workspace_cache(root)
+  local path = workspace_cache_path(root)
+  if vim.fn.filereadable(path) == 0 then
+    return {}
+  end
+  local ok, data = pcall(vim.fn.readfile, path)
+  if not ok or not data then
+    return {}
+  end
+  local decoded = vim.fn.json_decode(table.concat(data, "\n"))
+  if type(decoded) ~= "table" then
+    return {}
+  end
+  return decoded
+end
+
+local function write_workspace_cache(root, cache)
+  local path = workspace_cache_path(root)
+  local dir = vim.fn.fnamemodify(path, ":h")
+  if vim.fn.isdirectory(dir) == 0 then
+    vim.fn.mkdir(dir, "p")
+  end
+  local ok, encoded = pcall(vim.fn.json_encode, cache)
+  if not ok or not encoded then
+    return
+  end
+  pcall(vim.fn.writefile, { encoded }, path)
+end
+
+local function apply_workspace_cache(cfg, root)
+  local entry = read_workspace_cache(root)
+  if type(entry) ~= "table" or next(entry) == nil then
+    return cfg
+  end
+  if (not cfg.jls_dir or cfg.jls_dir == "") and entry.jls_dir then
+    cfg.jls_dir = entry.jls_dir
+  end
+  if (not cfg.java_home or cfg.java_home == "") and entry.java_home then
+    cfg.java_home = entry.java_home
+  end
+  cfg.lombok = cfg.lombok or {}
+  if (not cfg.lombok.path or cfg.lombok.path == "") and entry.lombok_path then
+    cfg.lombok.path = entry.lombok_path
+  end
+  if (not cfg.lombok.javaagent or cfg.lombok.javaagent == "") and entry.lombok_javaagent then
+    cfg.lombok.javaagent = entry.lombok_javaagent
+  end
+  return cfg
+end
+
+local function update_workspace_cache(root, cfg)
+  local entry = {
+    jls_dir = cfg.jls_dir,
+    java_home = cfg.java_home,
+    lombok_path = cfg.lombok and cfg.lombok.path or nil,
+    lombok_javaagent = cfg.lombok and cfg.lombok.javaagent or nil,
+  }
+  write_workspace_cache(root, entry)
+end
+
+local function pick_latest_path(paths)
+  if not paths or #paths == 0 then
+    return nil
+  end
+  table.sort(paths)
+  return paths[#paths]
+end
+
+local function find_lombok_in_paths(paths)
+  if not paths then
+    return nil
+  end
+  for _, p in ipairs(paths) do
+    if type(p) == "string" and p ~= "" then
+      if p:match("%.jar$") and vim.fn.filereadable(p) == 1 then
+        return p
+      end
+      local matches = vim.fn.glob(p, 1, 1)
+      if matches and #matches > 0 then
+        local jar = pick_latest_path(matches)
+        if jar and vim.fn.filereadable(jar) == 1 then
+          return jar
+        end
+      end
+      local globbed = vim.fn.globpath(p, "**/lombok-*.jar", 1, 1)
+      if globbed and #globbed > 0 then
+        local jar = pick_latest_path(globbed)
+        if jar and vim.fn.filereadable(jar) == 1 then
+          return jar
+        end
+      end
+    end
+  end
+  return nil
+end
+
+local function detect_lombok(cfg)
+  cfg.lombok = cfg.lombok or {}
+  if cfg.lombok.path and cfg.lombok.path ~= "" then
+    return cfg
+  end
+  local env_path = os.getenv("LOMBOK_PATH")
+  if env_path and env_path ~= "" and vim.fn.filereadable(env_path) == 1 then
+    cfg.lombok.path = env_path
+    return cfg
+  end
+
+  local search = cfg.lombok.search_paths or {}
+  local found = find_lombok_in_paths(search)
+  if found then
+    cfg.lombok.path = found
+    return cfg
+  end
+
+  local home = os.getenv("HOME")
+  if home and home ~= "" then
+    local m2 = joinpath(home, ".m2", "repository", "org", "projectlombok", "lombok", "*", "lombok-*.jar")
+    local m2_hits = vim.fn.glob(m2, 1, 1)
+    local m2_found = pick_latest_path(m2_hits)
+    if m2_found and vim.fn.filereadable(m2_found) == 1 then
+      cfg.lombok.path = m2_found
+      return cfg
+    end
+  end
+  return cfg
 end
 
 local function build_cmd(cfg)
@@ -183,6 +335,57 @@ local function get_clients_by_name(name)
 end
 
 
+local function normalize_path(path)
+  if not path or path == "" then
+    return nil
+  end
+  local real = vim.loop.fs_realpath(path)
+  return real or path
+end
+
+local function path_has_prefix(path, prefix)
+  local norm_path = normalize_path(path)
+  local norm_prefix = normalize_path(prefix)
+  if not norm_path or not norm_prefix then
+    return false
+  end
+  if norm_path == norm_prefix then
+    return true
+  end
+  return norm_path:sub(1, #norm_prefix + 1) == norm_prefix .. "/"
+end
+
+local function resolve_client_root(client, bufname)
+  local root = client and client.config and client.config.root_dir or nil
+  if type(root) == "function" then
+    root = root(bufname)
+  end
+  if not root or root == "" then
+    root = client and client.root_dir or nil
+  end
+  return root
+end
+
+local function buffer_matches_client(client, bufname, root)
+  local client_root = resolve_client_root(client, bufname)
+  if client_root and path_has_prefix(bufname, client_root) then
+    return true
+  end
+  if root and client_root and path_has_prefix(root, client_root) then
+    return true
+  end
+  if client.workspace_folders then
+    for _, folder in ipairs(client.workspace_folders) do
+      local folder_path = folder.uri and vim.uri_to_fname(folder.uri) or folder.name
+      if folder_path and path_has_prefix(bufname, folder_path) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+
 local status_state = { message = "", done = true }
 
 local function set_status(msg, done)
@@ -226,11 +429,15 @@ end
 ---@return string|nil
 function M.make_lsp_config(opts)
   local cfg = vim.tbl_deep_extend("force", default_config(), M.config, opts or {})
+  local root, _ = resolve_root_info(vim.api.nvim_buf_get_name(0), cfg)
+  cfg = apply_workspace_cache(cfg, root)
+  cfg = detect_lombok(cfg)
   local cmd, err = build_cmd(cfg)
   if not cmd then
     return nil, err
   end
 
+  M._last_resolved_cfg = cfg
   return {
     name = "jls",
     cmd = cmd,
@@ -256,12 +463,25 @@ function M.start(opts)
   if type(root) == "function" then
     root = root(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
   end
+  local bufnr = vim.api.nvim_get_current_buf()
+  local bufname = vim.api.nvim_buf_get_name(bufnr)
   for _, client in ipairs(get_clients_by_name("jls")) do
-    if client.config and client.config.root_dir == root then
+    if client.attached_buffers and client.attached_buffers[bufnr] then
+      return
+    end
+    if buffer_matches_client(client, bufname, root) then
+      pcall(vim.lsp.buf_attach_client, bufnr, client.id)
       return
     end
   end
 
+  local _, fallback = resolve_root_info(vim.api.nvim_buf_get_name(0), M.config)
+  if fallback and not warned_roots[root] then
+    warned_roots[root] = true
+    notify("JLS: root markers not found; using cwd: " .. root, vim.log.levels.WARN)
+  end
+
+  update_workspace_cache(root, M._last_resolved_cfg or vim.tbl_deep_extend("force", default_config(), M.config, opts or {}))
   notify("JLS: starting...", vim.log.levels.INFO)
   local ok, lspconfig = pcall(require, "lspconfig")
   local ok_configs, configs = pcall(require, "lspconfig.configs")
@@ -326,12 +546,37 @@ function M.info()
     return
   end
 
-  local root = resolve_root(vim.api.nvim_buf_get_name(0), cfg)
+  local root, fallback = resolve_root_info(vim.api.nvim_buf_get_name(0), cfg)
   local lines = {
     "JLS",
     "root: " .. root,
+    fallback and "root-warning: markers not found, using cwd" or "root-warning: none",
     "cmd: " .. table.concat(cmd, " "),
   }
+  notify(table.concat(lines, "\n"), vim.log.levels.INFO)
+end
+
+function M.doctor()
+  local cfg = vim.tbl_deep_extend("force", default_config(), M.config)
+  local root, fallback = resolve_root_info(vim.api.nvim_buf_get_name(0), cfg)
+  cfg = apply_workspace_cache(cfg, root)
+  cfg = detect_lombok(cfg)
+  local cmd, err = build_cmd(cfg)
+  local lines = {
+    "JLS Doctor",
+    "root: " .. root,
+    fallback and "root-warning: markers not found, using cwd" or "root-warning: none",
+    "jls_dir: " .. tostring(cfg.jls_dir),
+    "java_home: " .. tostring(cfg.java_home),
+    "lombok.path: " .. tostring(cfg.lombok and cfg.lombok.path or nil),
+    "lombok.javaagent: " .. tostring(cfg.lombok and cfg.lombok.javaagent or nil),
+    "settings: " .. vim.inspect(cfg.settings),
+  }
+  if cmd then
+    table.insert(lines, "cmd: " .. table.concat(cmd, " "))
+  else
+    table.insert(lines, "cmd: <error> " .. (err or "unknown"))
+  end
   notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
@@ -349,6 +594,11 @@ function M.cache_clear()
   else
     notify("Failed to remove JLS cache: " .. dir, vim.log.levels.ERROR)
   end
+end
+
+function M.cache_clear_restart()
+  M.cache_clear()
+  M.restart()
 end
 
 function M.logs()
