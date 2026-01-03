@@ -63,6 +63,8 @@ end
 
 ---@type JlsConfig
 M.config = default_config()
+M._client_id = nil
+M._client_group = nil
 
 local function joinpath(...)
   if vim.fs and vim.fs.joinpath then
@@ -321,71 +323,145 @@ local function notify(msg, level)
 end
 
 
-local function get_clients_by_name(name)
-  if vim.lsp.get_clients then
-    return vim.lsp.get_clients({ name = name })
-  end
-
-  local clients = vim.lsp.get_active_clients()
-  local filtered = {}
-  for _, client in ipairs(clients) do
-    if client.name == name then
-      table.insert(filtered, client)
-    end
-  end
-  return filtered
-end
-
-
-local function normalize_path(path)
-  if not path or path == "" then
+local function get_jls_client(bufnr)
+  if not M._client_id then
     return nil
   end
-  local real = vim.loop.fs_realpath(path)
-  return real or path
+  local client = vim.lsp.get_client_by_id(M._client_id)
+  if not client or client.name ~= "jls" then
+    return nil
+  end
+  if bufnr and client.attached_buffers and not client.attached_buffers[bufnr] then
+    return nil
+  end
+  return client
 end
 
-local function path_has_prefix(path, prefix)
-  local norm_path = normalize_path(path)
-  local norm_prefix = normalize_path(prefix)
-  if not norm_path or not norm_prefix then
+local function pos_in_range(pos, range)
+  if not range or not range.start or not range["end"] then
     return false
   end
-  if norm_path == norm_prefix then
-    return true
+  if pos.line < range.start.line or pos.line > range["end"].line then
+    return false
   end
-  return norm_path:sub(1, #norm_prefix + 1) == norm_prefix .. "/"
+  if pos.line == range.start.line and pos.character < range.start.character then
+    return false
+  end
+  if pos.line == range["end"].line and pos.character > range["end"].character then
+    return false
+  end
+  return true
 end
 
-local function resolve_client_root(client, bufname)
-  local root = client and client.config and client.config.root_dir or nil
-  if type(root) == "function" then
-    root = root(bufname)
-  end
-  if not root or root == "" then
-    root = client and client.root_dir or nil
-  end
-  return root
+local function symbol_kinds()
+  local kinds = vim.lsp.protocol and vim.lsp.protocol.SymbolKind or {}
+  return {
+    class = kinds.Class or 5,
+    field = kinds.Field or 8,
+  }
 end
 
-local function buffer_matches_client(client, bufname, root)
-  local client_root = resolve_client_root(client, bufname)
-  if client_root and path_has_prefix(bufname, client_root) then
-    return true
+local function collect_fields_from_symbols(symbols, cursor)
+  local kinds = symbol_kinds()
+  if not symbols or #symbols == 0 then
+    return {}
   end
-  if root and client_root and path_has_prefix(root, client_root) then
-    return true
-  end
-  if client.workspace_folders then
-    for _, folder in ipairs(client.workspace_folders) do
-      local folder_path = folder.uri and vim.uri_to_fname(folder.uri) or folder.name
-      if folder_path and path_has_prefix(bufname, folder_path) then
-        return true
+
+  if symbols[1].range then
+    local classes = {}
+    local function scan(node)
+      if node.kind == kinds.class then
+        table.insert(classes, node)
+      end
+      if node.children then
+        for _, child in ipairs(node.children) do
+          scan(child)
+        end
       end
     end
+    for _, sym in ipairs(symbols) do
+      scan(sym)
+    end
+
+    local target = nil
+    for _, cls in ipairs(classes) do
+      if pos_in_range(cursor, cls.range) then
+        target = cls
+        break
+      end
+    end
+    if not target then
+      target = classes[1]
+    end
+    if not target or not target.children then
+      return {}
+    end
+    local fields = {}
+    for _, child in ipairs(target.children) do
+      if child.kind == kinds.field then
+        table.insert(fields, child.name)
+      end
+    end
+    return fields
   end
-  return false
+
+  local fields = {}
+  for _, sym in ipairs(symbols) do
+    if sym.kind == kinds.field then
+      table.insert(fields, sym.name)
+    end
+  end
+  return fields
 end
+
+local function names_to_patterns(names)
+  local patterns = {}
+  for _, name in ipairs(names or {}) do
+    table.insert(patterns, "^" .. vim.pesc(name) .. "$")
+  end
+  return patterns
+end
+
+local function set_client_settings(client, settings)
+  client.config.settings = settings
+  client.notify("workspace/didChangeConfiguration", { settings = settings })
+end
+
+local function request_code_actions(client, bufnr, title, apply_settings, restore_settings)
+  local win = vim.api.nvim_get_current_win()
+  local params = vim.lsp.util.make_range_params(win, client.offset_encoding)
+  params.context = { diagnostics = {} }
+  apply_settings()
+  client.request("textDocument/codeAction", params, function(err, actions)
+    restore_settings()
+    if err then
+      notify("JLS: code actions failed: " .. err.message, vim.log.levels.ERROR)
+      return
+    end
+    if not actions or vim.tbl_isempty(actions) then
+      notify("JLS: no code actions available", vim.log.levels.WARN)
+      return
+    end
+    local action = nil
+    for _, item in ipairs(actions) do
+      if item.title == title then
+        action = item
+        break
+      end
+    end
+    if not action then
+      notify("JLS: action not found: " .. title, vim.log.levels.WARN)
+      return
+    end
+    if action.edit then
+      vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
+    end
+    if action.command then
+      vim.lsp.buf.execute_command(action.command)
+    end
+  end, bufnr)
+end
+
 
 
 local status_state = { message = "", done = true }
@@ -466,15 +542,13 @@ function M.start(opts)
     root = root(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
   end
   local bufnr = vim.api.nvim_get_current_buf()
-  local bufname = vim.api.nvim_buf_get_name(bufnr)
-  for _, client in ipairs(get_clients_by_name("jls")) do
+  local client = get_jls_client(bufnr)
+  if client then
     if client.attached_buffers and client.attached_buffers[bufnr] then
       return
     end
-    if buffer_matches_client(client, bufname, root) then
-      pcall(vim.lsp.buf_attach_client, bufnr, client.id)
-      return
-    end
+    pcall(vim.lsp.buf_attach_client, bufnr, client.id)
+    return
   end
 
   local _, fallback = resolve_root_info(vim.api.nvim_buf_get_name(0), M.config)
@@ -509,16 +583,14 @@ function M.start(opts)
 end
 
 function M.stop()
-  local clients = get_clients_by_name("jls")
-  if #clients == 0 then
+  local client = get_jls_client(nil)
+  if not client then
     notify("JLS: no running clients", vim.log.levels.WARN)
     return
   end
 
-  for _, client in ipairs(clients) do
-    client:stop(true)
-  end
-  notify("JLS: stopped (" .. #clients .. " client)", vim.log.levels.INFO)
+  client:stop(true)
+  notify("JLS: stopped", vim.log.levels.INFO)
 end
 
 ---@param opts JlsConfig|nil
@@ -612,6 +684,179 @@ function M.logs()
   vim.cmd("split " .. vim.fn.fnameescape(log_path))
 end
 
+local function ensure_snacks()
+  local ok, snacks = pcall(require, "snacks")
+  if not ok then
+    notify("JLS: Snacks.nvim is required for this UI", vim.log.levels.WARN)
+    return nil
+  end
+  return snacks
+end
+
+local function apply_action(client, action)
+  if not action then
+    return
+  end
+  if action.edit then
+    vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
+  end
+  if action.command then
+    vim.lsp.buf.execute_command(action.command)
+  end
+end
+
+local function pick_constructor_fields(client, bufnr)
+  local snacks = ensure_snacks()
+  if not snacks then
+    return
+  end
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local pos = { line = cursor[1] - 1, character = cursor[2] }
+  local params = { textDocument = { uri = vim.uri_from_bufnr(bufnr) } }
+  client.request("textDocument/documentSymbol", params, function(err, symbols)
+    if err then
+      notify("JLS: document symbols failed: " .. err.message, vim.log.levels.ERROR)
+      return
+    end
+    local fields = collect_fields_from_symbols(symbols, pos)
+    if #fields == 0 then
+      notify("JLS: no fields found for constructor", vim.log.levels.WARN)
+      return
+    end
+    local items = {}
+    for _, name in ipairs(fields) do
+      table.insert(items, { text = name, name = name })
+    end
+
+    snacks.picker.pick({
+      title = "Constructor fields",
+      items = items,
+      layout = { preview = false, hidden = { "preview" } },
+      format = function(item)
+        return { { item.text } }
+      end,
+      formatters = {
+        selected = { show_always = true, unselected = true },
+      },
+      actions = {
+        jls_toggle = function(picker, item)
+          if not item then
+            return
+          end
+          picker.list:select(item)
+        end,
+        confirm = function(picker)
+          local selected = picker:selected({ fallback = false })
+          local names = {}
+          for _, sel in ipairs(selected) do
+            if sel.name then
+              table.insert(names, sel.name)
+            end
+          end
+          picker:close()
+          local original = vim.deepcopy(client.config.settings or {})
+          local include = names_to_patterns(names)
+          local patch = {
+            jls = {
+              codeActions = {
+                generateConstructor = {
+                  include = include,
+                  exclude = {},
+                },
+              },
+            },
+          }
+          local merged = vim.tbl_deep_extend("force", original, patch)
+          request_code_actions(
+            client,
+            bufnr,
+            "Generate constructor",
+            function()
+              set_client_settings(client, merged)
+            end,
+            function()
+              set_client_settings(client, original)
+            end
+          )
+        end,
+      },
+      win = {
+        preview = { enabled = false },
+        input = {
+          footer = {
+            { "Select fields with <Space>, then press <Enter> to generate", "DiagnosticWarn" },
+          },
+          footer_pos = "center",
+          keys = {
+            ["<Space>"] = { "jls_toggle", mode = { "i", "n" } },
+            ["<CR>"] = { "confirm", mode = { "i", "n" } },
+          },
+        },
+        list = {
+          keys = {
+            ["<Space>"] = "jls_toggle",
+            ["<CR>"] = "confirm",
+          },
+        },
+      },
+    })
+  end, bufnr)
+end
+
+function M.code_actions()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local client = get_jls_client(bufnr)
+  if not client then
+    notify("JLS: not attached", vim.log.levels.WARN)
+    return
+  end
+  local snacks = ensure_snacks()
+  if not snacks then
+    return
+  end
+
+  local win = vim.api.nvim_get_current_win()
+  local params = vim.lsp.util.make_range_params(win, client.offset_encoding)
+  params.context = { diagnostics = vim.diagnostic.get(bufnr) }
+  client.request("textDocument/codeAction", params, function(err, actions)
+    if err then
+      notify("JLS: code actions failed: " .. err.message, vim.log.levels.ERROR)
+      return
+    end
+    if not actions or vim.tbl_isempty(actions) then
+      notify("JLS: no code actions available", vim.log.levels.WARN)
+      return
+    end
+    local items = {}
+    for _, action in ipairs(actions) do
+      table.insert(items, { text = action.title, action = action })
+    end
+
+    snacks.picker.pick({
+      title = "JLS Code Actions",
+      items = items,
+      layout = { preview = false, hidden = { "preview" } },
+      format = function(item)
+        return { { item.text } }
+      end,
+      win = { preview = { enabled = false } },
+      actions = {
+        confirm = function(picker, item)
+          picker:close()
+          if not item or not item.action then
+            return
+          end
+          if item.action.title == "Generate constructor" then
+            pick_constructor_fields(client, bufnr)
+          else
+            apply_action(client, item.action)
+          end
+        end,
+      },
+    })
+  end, bufnr)
+end
+
 function M.statusline()
   return statusline_text()
 end
@@ -620,16 +865,32 @@ end
 function M.setup(args)
   M.config = vim.tbl_deep_extend("force", default_config(), M.config, args or {})
 
+  if not M._client_group then
+    M._client_group = vim.api.nvim_create_augroup("JlsClientCache", { clear = true })
+    vim.api.nvim_create_autocmd("LspAttach", {
+      group = M._client_group,
+      callback = function(ev)
+        local client = vim.lsp.get_client_by_id(ev.data.client_id)
+        if client and client.name == "jls" then
+          M._client_id = client.id
+        end
+      end,
+    })
+    vim.api.nvim_create_autocmd("LspDetach", {
+      group = M._client_group,
+      callback = function(ev)
+        if M._client_id == ev.data.client_id then
+          M._client_id = nil
+        end
+      end,
+    })
+  end
+
   if M.config.codelens and M.config.codelens.enable then
     local group = vim.api.nvim_create_augroup("JlsCodeLens", { clear = true })
 
     local function has_jls(bufnr)
-      for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-        if client.name == "jls" then
-          return true
-        end
-      end
-      return false
+      return get_jls_client(bufnr) ~= nil
     end
 
     local function refresh(bufnr)

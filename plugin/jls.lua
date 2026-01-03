@@ -31,3 +31,7 @@ end, {})
 vim.api.nvim_create_user_command("JlsLogs", function()
   jls.logs()
 end, {})
+
+vim.api.nvim_create_user_command("JlsCodeActions", function()
+  jls.code_actions()
+end, {})
