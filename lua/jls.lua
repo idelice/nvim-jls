@@ -761,7 +761,6 @@ local function pick_constructor_fields(client, bufnr)
               codeActions = {
                 generateConstructor = {
                   include = include,
-                  exclude = {},
                 },
               },
             },
