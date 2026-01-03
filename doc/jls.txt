@@ -44,6 +44,7 @@ COMMANDS~
 :JlsCacheClear  Remove JLS workspace cache under ~/.cache/jls/.
 :JlsCacheClearRestart  Clear cache and restart JLS.
 :JlsLogs        Open Neovim LSP log.
+:JlsCodeActions Show available code actions from JLS.
 
 CONFIGURATION~
 

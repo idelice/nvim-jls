@@ -59,6 +59,7 @@ JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is 
 - `:JlsCacheClear` – delete workspace cache under `~/.cache/jls/`
 - `:JlsCacheClearRestart` – clear cache and restart JLS
 - `:JlsLogs` – open Neovim LSP log
+- `:JlsCodeActions` – show available code actions from JLS (Snacks picker UI)
 
 ## Configuration
 
