@@ -17,6 +17,18 @@ local function apply_action(client, action)
   if not action then
     return
   end
+  local supports_resolve = util.supports_code_action_resolve(client)
+
+  if (not action.edit and not action.command) and supports_resolve then
+    client.request("codeAction/resolve", action, function(err, resolved)
+      if err then
+        util.notify("JLS: resolve failed: " .. err.message, vim.log.levels.ERROR)
+        return
+      end
+      apply_action(client, resolved or action)
+    end)
+    return
+  end
   if action.edit then
     vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
   end

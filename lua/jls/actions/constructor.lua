@@ -94,11 +94,25 @@ local function request_code_actions(client, bufnr, title, apply_settings, restor
       util.notify("JLS: action not found: " .. title, vim.log.levels.WARN)
       return
     end
-    if action.edit then
-      vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding)
+    local supports_resolve = util.supports_code_action_resolve(client)
+    local function apply(resolved)
+      if resolved.edit then
+        vim.lsp.util.apply_workspace_edit(resolved.edit, client.offset_encoding)
+      end
+      if resolved.command then
+        vim.lsp.buf.execute_command(resolved.command)
+      end
     end
-    if action.command then
-      vim.lsp.buf.execute_command(action.command)
+    if (not action.edit and not action.command) and supports_resolve then
+      client.request("codeAction/resolve", action, function(resolve_err, resolved)
+        if resolve_err then
+          util.notify("JLS: resolve failed: " .. resolve_err.message, vim.log.levels.ERROR)
+          return
+        end
+        apply(resolved or action)
+      end)
+    else
+      apply(action)
     end
   end, bufnr)
 end

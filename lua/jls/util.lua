@@ -49,4 +49,15 @@ function M.names_to_patterns(names)
   return patterns
 end
 
+function M.supports_code_action_resolve(client)
+  if not client or not client.server_capabilities then
+    return false
+  end
+  local provider = client.server_capabilities.codeActionProvider
+  if type(provider) == "table" then
+    return provider.resolveProvider == true
+  end
+  return false
+end
+
 return M
