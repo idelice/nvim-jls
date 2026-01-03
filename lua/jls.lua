@@ -666,6 +666,11 @@ function M.setup(args)
     vim.api.nvim_create_autocmd("LspProgress", {
       group = group,
       callback = function(ev)
+        local client_id = ev.data and ev.data.client_id or nil
+        local client = client_id and vim.lsp.get_client_by_id(client_id) or nil
+        if not client or client.name ~= "jls" then
+          return
+        end
         local value = ev.data and ev.data.params and ev.data.params.value or nil
         if type(value) == "table" then
           local title = value.title or ""
