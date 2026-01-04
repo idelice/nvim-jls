@@ -9,7 +9,7 @@ JLS can run as a raw LSP server, but configuring it correctly is the hard part. 
 - OS‑aware launcher resolution (`dist/lang_server_{linux|mac|windows}`)
 - Stable root detection for Maven/Gradle/Bazel projects
 - Lombok support via `-Dorg.javacs.lombokPath` or `-javaagent` (manual jar path optional; auto-detected)
-- Built‑in commands and status reporting
+- Built‑in commands
 
 ## Requirements
 
@@ -97,7 +97,6 @@ require("jls").setup({
   lombok = { path = nil, javaagent = nil },
   -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
   extra_args = {},               -- extra args passed to JLS launcher
-  status = { enable = true, notify = false }, -- progress status
   codelens = { enable = false }, -- auto-refresh codelens on BufEnter
 })
 ```
@@ -151,18 +150,6 @@ env = {
 
 ```lua
 extra_args = { "-Xmx2g", "-Dhttps.proxyHost=proxy", "-Dhttps.proxyPort=8443" }
-```
-
-## Statusline
-
-Show JLS progress in your statusline:
-
-```lua
-require("lualine").setup({
-  sections = {
-    lualine_c = { function() return require("jls").statusline() end },
-  },
-})
 ```
 
 ## Notes

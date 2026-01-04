@@ -8,7 +8,7 @@ INTRODUCTION~
 
 nvim-jls provides a clean, batteries-included Neovim setup for JLS (Java Language
 Server), with OS-aware launcher resolution, Lombok wiring, stable root detection,
-commands, and status reporting.
+and commands.
 
 REQUIREMENTS~
 
@@ -80,23 +80,9 @@ CONFIGURATION~
     lombok = { path = nil, javaagent = nil },
     -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
     extra_args = {},
-    status = { enable = true, notify = false },
     codelens = { enable = false },
   })
 <
-
-STATUSLINE~
-
-*jls-statusline*
-
->
-  require("lualine").setup({
-    sections = {
-      lualine_c = { function() return require("jls").statusline() end },
-    },
-  })
-<
-
 NOTES~
 
 *jls-notes*
