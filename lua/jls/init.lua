@@ -3,7 +3,6 @@ local util = require("jls.util")
 local client_mod = require("jls.client")
 local lsp = require("jls.lsp")
 local actions = require("jls.actions")
-local status = require("jls.ui.status")
 local codelens = require("jls.ui.codelens")
 
 ---@class JlsModule
@@ -69,7 +68,6 @@ function M.setup(args)
   state.config = config.merge(state.config, args or {})
   M.config = state.config
   client_mod.setup_autocmds()
-  status.setup(state.config, util.notify)
   codelens.setup(state.config)
 end
 

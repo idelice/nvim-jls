@@ -19,10 +19,14 @@ function M.detect_os()
 end
 
 function M.notify(msg, level)
-  local ok = pcall(vim.notify, msg, level or vim.log.levels.INFO, { title = "jls" })
-  if not ok then
-    pcall(vim.notify, msg, level or vim.log.levels.INFO)
+  local lvl = level or vim.log.levels.INFO
+  local ok, snacks = pcall(require, "snacks")
+  if ok and snacks.notify then
+    -- Prefer Snacks if available
+    pcall(snacks.notify, msg, lvl, { title = "jls" })
+    return
   end
+  pcall(vim.notify, msg, lvl, { title = "jls" })
 end
 
 function M.pos_in_range(pos, range)

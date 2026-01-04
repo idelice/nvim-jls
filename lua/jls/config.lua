@@ -3,10 +3,6 @@
 ---@field javaagent string|nil Path to lombok javaagent jar
 ---@field search_paths string[]|nil Extra paths/globs to search for lombok.jar
 
----@class JlsStatusConfig
----@field enable boolean
----@field notify boolean
-
 ---@class JlsConfig
 ---@field cmd string[]|string|nil Explicit command to start JLS
 ---@field jls_dir string|nil Path to JLS install root containing dist/
@@ -53,7 +49,6 @@ function M.default()
     java_home = nil,
     lombok = { path = nil, javaagent = nil, search_paths = nil },
     extra_args = {},
-    status = { enable = true, notify = false },
     codelens = { enable = false },
   }
 end

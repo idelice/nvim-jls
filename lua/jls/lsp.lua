@@ -68,7 +68,6 @@ function M.start(state, opts)
   end
 
   cache.update_workspace_cache(root_dir, state._last_resolved_cfg or config.merge(state.config, opts or {}))
-  util.notify("JLS: starting...", vim.log.levels.INFO)
   local ok, lspconfig = pcall(require, "lspconfig")
   local ok_configs, configs = pcall(require, "lspconfig.configs")
   if ok and ok_configs and configs and configs.jls then
@@ -90,7 +89,6 @@ function M.start(state, opts)
       local client = vim.lsp.get_client_by_id(args.data.client_id)
       if client and client.name == "jls" then
         vim.api.nvim_del_augroup_by_id(group)
-        util.notify("JLS: started", vim.log.levels.INFO)
       end
     end,
     once = true,
@@ -119,7 +117,6 @@ end
 ---@param state table
 ---@param opts JlsConfig|nil
 function M.restart(state, opts)
-  util.notify("JLS: restarting...", vim.log.levels.INFO)
   M.stop(state)
   M.start(state, opts)
 end
