@@ -70,10 +70,11 @@ end
 
 local function request_code_actions(client, bufnr, title, apply_settings, restore_settings)
   local win = vim.api.nvim_get_current_win()
+  ---@type lsp.CodeActionParams
   local params = vim.lsp.util.make_range_params(win, client.offset_encoding)
   params.context = { diagnostics = {} }
   apply_settings()
-  client.request("textDocument/codeAction", params, function(err, actions)
+  client:request("textDocument/codeAction", params, function(err, actions)
     restore_settings()
     if err then
       util.notify("JLS: code actions failed: " .. err.message, vim.log.levels.ERROR)
@@ -104,7 +105,7 @@ local function request_code_actions(client, bufnr, title, apply_settings, restor
       end
     end
     if (not action.edit and not action.command) and supports_resolve then
-      client.request("codeAction/resolve", action, function(resolve_err, resolved)
+      client:request("codeAction/resolve", action, function(resolve_err, resolved)
         if resolve_err then
           util.notify("JLS: resolve failed: " .. resolve_err.message, vim.log.levels.ERROR)
           return

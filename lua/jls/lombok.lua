@@ -19,14 +19,14 @@ local function find_lombok_in_paths(paths)
       if p:match("%.jar$") and vim.fn.filereadable(p) == 1 then
         return p
       end
-      local matches = vim.fn.glob(p, 1, 1)
+      local matches = vim.fn.glob(p, true, true)
       if matches and #matches > 0 then
         local jar = pick_latest_path(matches)
         if jar and vim.fn.filereadable(jar) == 1 then
           return jar
         end
       end
-      local globbed = vim.fn.globpath(p, "**/lombok-*.jar", 1, 1)
+      local globbed = vim.fn.globpath(p, "**/lombok-*.jar", true, true)
       if globbed and #globbed > 0 then
         local jar = pick_latest_path(globbed)
         if jar and vim.fn.filereadable(jar) == 1 then
@@ -68,7 +68,7 @@ function M.detect(cfg)
       "*",
       "lombok-*.jar"
     )
-    local m2_hits = vim.fn.glob(m2, 1, 1)
+    local m2_hits = vim.fn.glob(m2, true, true)
     local m2_found = pick_latest_path(m2_hits)
     if m2_found and vim.fn.filereadable(m2_found) == 1 then
       cfg.lombok.path = m2_found

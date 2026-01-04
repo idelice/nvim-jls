@@ -83,8 +83,11 @@ function M.update_workspace_cache(root, cfg)
 end
 
 function M.server_cache_dir(root)
-  local safe = root:gsub("[/%s]", "_")
-  return util.joinpath(cache_home(), "jls", safe)
+  local name = vim.fn.fnamemodify(root, ":t")
+  if not name or name == "" then
+    name = root:gsub("[/%s]", "_")
+  end
+  return util.joinpath(cache_home(), "jls", name)
 end
 
 function M.remove_dir(path)

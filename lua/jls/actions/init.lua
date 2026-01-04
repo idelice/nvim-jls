@@ -50,9 +50,10 @@ function M.code_actions()
   end
 
   local win = vim.api.nvim_get_current_win()
+  ---@type lsp.CodeActionParams
   local params = vim.lsp.util.make_range_params(win, client.offset_encoding)
   params.context = { diagnostics = vim.diagnostic.get(bufnr) }
-  client.request("textDocument/codeAction", params, function(err, actions)
+  client:request("textDocument/codeAction", params, function(err, actions)
     if err then
       util.notify("JLS: code actions failed: " .. err.message, vim.log.levels.ERROR)
       return
@@ -69,7 +70,7 @@ function M.code_actions()
     snacks.picker.pick({
       title = "JLS Code Actions",
       items = items,
-      layout = { preview = false, hidden = { "preview" } },
+      layout = { main = { preview = { enabled = false } } },
       format = function(item)
         return { { item.text } }
       end,

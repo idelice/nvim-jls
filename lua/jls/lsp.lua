@@ -47,18 +47,18 @@ function M.start(state, opts)
     return
   end
 
+  local bufnr = vim.api.nvim_get_current_buf()
+  -- Prefer any running JLS client and just attach this buffer (avoids spawning
+  -- a new client when jumping into jars in ~/.m2)
+  local existing = client_mod.get(nil)
+  if existing then
+    pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
+    return
+  end
+
   local root_dir = lsp_config.root_dir
   if type(root_dir) == "function" then
     root_dir = root_dir(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
-  end
-  local bufnr = vim.api.nvim_get_current_buf()
-  local existing = client_mod.get(bufnr)
-  if existing then
-    if existing.attached_buffers and existing.attached_buffers[bufnr] then
-      return
-    end
-    pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
-    return
   end
 
   local _, fallback = root.resolve_root_info(vim.api.nvim_buf_get_name(0), state.config)
