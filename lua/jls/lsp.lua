@@ -118,7 +118,9 @@ end
 ---@param opts JlsConfig|nil
 function M.restart(state, opts)
   M.stop(state)
-  M.start(state, opts)
+  vim.defer_fn(function()
+    M.start(state, opts)
+  end, 50)
 end
 
 ---@param state table
