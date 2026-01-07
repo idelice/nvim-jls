@@ -81,6 +81,7 @@ CONFIGURATION~
     -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
     extra_args = {},
     codelens = { enable = false },
+    stop_on_exit = false,
   })
 <
 NOTES~
@@ -95,3 +96,4 @@ NOTES~
   This plugin works with or without them and remains compatible if they add JLS later.
 - nvim-jls caches resolved config per workspace under ~/.cache/nvim-jls/<workspace>/config.json.
 - codelens.enable toggles auto-refresh on BufEnter.
+- stop_on_exit stops JLS when exiting Neovim.

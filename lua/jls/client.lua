@@ -2,10 +2,15 @@ local M = {}
 
 M._client_id = nil
 M._group = nil
+M._stop_on_exit = false
 
-function M.setup_autocmds()
+---@param cfg JlsConfig|nil
+function M.setup_autocmds(cfg)
   if M._group then
     return
+  end
+  if cfg and cfg.stop_on_exit ~= nil then
+    M._stop_on_exit = cfg.stop_on_exit
   end
   M._group = vim.api.nvim_create_augroup("JlsClientCache", { clear = true })
   vim.api.nvim_create_autocmd("LspAttach", {
@@ -22,6 +27,18 @@ function M.setup_autocmds()
     callback = function(ev)
       if M._client_id == ev.data.client_id then
         M._client_id = nil
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd({ "VimLeavePre", "ExitPre" }, {
+    group = M._group,
+    callback = function()
+      if not M._stop_on_exit then
+        return
+      end
+      local client = M.get(nil)
+      if client then
+        client:stop(true)
       end
     end,
   })

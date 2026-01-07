@@ -67,7 +67,7 @@ end
 function M.setup(args)
   state.config = config.merge(state.config, args or {})
   M.config = state.config
-  client_mod.setup_autocmds()
+  client_mod.setup_autocmds(state.config)
   codelens.setup(state.config)
 end
 

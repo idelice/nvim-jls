@@ -16,6 +16,7 @@
 ---@field extra_args string[]
 ---@field status JlsStatusConfig
 ---@field codelens { enable: boolean }
+---@field stop_on_exit boolean
 
 local M = {}
 
@@ -50,6 +51,7 @@ function M.default()
     lombok = { path = nil, javaagent = nil, search_paths = nil },
     extra_args = {},
     codelens = { enable = false },
+    stop_on_exit = false,
   }
 end
 
