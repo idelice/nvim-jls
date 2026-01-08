@@ -1,6 +1,6 @@
 # nvim-jls
 
-Neovim integration for JLS (Java Language Server). This plugin provides a clean, batteries‑included setup for JLS with sensible defaults, Lombok wiring, runtime hints, and convenience commands.
+Neovim integration for [JLS](https://github.com/idelice/jls) (Java Language Server). This plugin provides a clean, batteries‑included setup for JLS with sensible defaults, Lombok wiring, runtime hints, and convenience commands.
 
 ## Why this plugin
 
