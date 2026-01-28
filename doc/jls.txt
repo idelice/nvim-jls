@@ -6,9 +6,8 @@ INTRODUCTION~
 
 *jls-introduction*
 
-nvim-jls provides a clean, batteries-included Neovim setup for JLS (Java Language
-Server), with OS-aware launcher resolution, Lombok wiring, stable root detection,
-and commands.
+nvim-jls provides Neovim integration for JLS (Java Language Server), with
+OS-aware launcher resolution and stable root detection.
 
 REQUIREMENTS~
 
@@ -25,7 +24,6 @@ SETUP~
 >
   require("jls").setup({
     jls_dir = "/path/to/jls",
-    lombok = { path = "/path/to/lombok.jar" },
   })
 <
 
@@ -39,12 +37,7 @@ COMMANDS~
 :JlsStart       Start JLS for the current buffer.
 :JlsRestart     Restart JLS.
 :JlsStop        Stop all running JLS clients.
-:JlsInfo        Show resolved root and command.
 :JlsDoctor      Show effective config and diagnostics.
-:JlsCacheClear  Remove JLS workspace cache under ~/.cache/jls/.
-:JlsCacheClearRestart  Clear cache and restart JLS.
-:JlsLogs        Open Neovim LSP log.
-:JlsCodeActions Show available code actions from JLS.
 
 CONFIGURATION~
 
@@ -52,7 +45,6 @@ CONFIGURATION~
 
 >
   require("jls").setup({
-    cmd = nil,
     jls_dir = nil,
     filetypes = { "java" },
     root_markers = {
@@ -66,34 +58,5 @@ CONFIGURATION~
       ".java-version",
       ".git",
     },
-    settings = {
-      jls = {
-        features = {
-          inlayHints = true,
-          semanticTokens = true,
-        },
-      },
-    },
-    init_options = {},
-    env = {},
-    java_home = nil,
-    lombok = { path = nil, javaagent = nil },
-    -- lombok = { path = nil, javaagent = nil, search_paths = { "/opt/lombok/*.jar" } },
-    extra_args = {},
-    codelens = { enable = false },
-    stop_on_exit = false,
   })
 <
-NOTES~
-
-*jls-notes*
-
-- If cmd is not set, the plugin resolves the launcher using jls_dir, JLS_HOME, or JLS_DIR.
-- JLS runtime selection follows JAVA_HOME or ~/.config/jls/runtimes.json.
-- Notifications use vim.notify; Noice will render them automatically if installed.
-- For Lombok compilation issues, ensure Maven runs annotation processors.
-- JLS is not listed in nvim-lspconfig or mason yet due to the GitHub star threshold.
-  This plugin works with or without them and remains compatible if they add JLS later.
-- nvim-jls caches resolved config per workspace under ~/.cache/nvim-jls/<workspace>/config.json.
-- codelens.enable toggles auto-refresh on BufEnter.
-- stop_on_exit stops JLS when exiting Neovim.

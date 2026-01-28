@@ -2,8 +2,6 @@ local config = require("jls.config")
 local util = require("jls.util")
 local client_mod = require("jls.client")
 local lsp = require("jls.lsp")
-local actions = require("jls.actions")
-local codelens = require("jls.ui.codelens")
 
 ---@class JlsModule
 local M = {}
@@ -35,32 +33,8 @@ function M.restart(opts)
   lsp.restart(state, opts)
 end
 
-function M.info()
-  lsp.info(state)
-end
-
 function M.doctor()
   lsp.doctor(state)
-end
-
-function M.cache_clear()
-  lsp.cache_clear(state)
-end
-
-function M.cache_clear_restart()
-  lsp.cache_clear_restart(state)
-end
-
-function M.logs()
-  lsp.logs()
-end
-
-function M.statusline()
-  return status.statusline()
-end
-
-function M.code_actions()
-  actions.code_actions()
 end
 
 ---@param args JlsConfig|nil
@@ -68,7 +42,6 @@ function M.setup(args)
   state.config = config.merge(state.config, args or {})
   M.config = state.config
   client_mod.setup_autocmds(state.config)
-  codelens.setup(state.config)
 end
 
 return M
