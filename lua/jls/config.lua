@@ -3,6 +3,8 @@
 ---@field filetypes string[]
 ---@field root_markers string[]
 ---@field settings table
+---@field inlay_hints boolean
+---@field codelens boolean
 
 local M = {}
 
@@ -23,6 +25,8 @@ function M.default()
       ".git",
     },
     settings = {},
+    inlay_hints = false,
+    codelens = false,
   }
 end
 

@@ -8,6 +8,64 @@ local M = {}
 
 local warned_roots = {}
 
+---@param cfg JlsConfig
+---@return table
+local function build_settings(cfg)
+  local settings = vim.deepcopy(cfg.settings or {})
+  if cfg.inlay_hints then
+    settings.java = settings.java or {}
+    if settings.java.inlayHints == nil then
+      settings.java.inlayHints = { enabled = true }
+    end
+  end
+  if cfg.codelens then
+    settings.java = settings.java or {}
+    if settings.java.codeLens == nil and settings.java.codelens == nil then
+      settings.java.codeLens = true
+    end
+  end
+  return settings
+end
+
+---@param bufnr integer
+---@param client table|nil
+---@param cfg JlsConfig
+local function on_attach(bufnr, client, cfg)
+  if not client or client.name ~= "jls" then
+    return
+  end
+
+  if cfg.inlay_hints then
+    local ok_hint, hint = pcall(function()
+      return vim.lsp.inlay_hint
+    end)
+    if ok_hint and hint and type(hint.enable) == "function" then
+      pcall(hint.enable, true, { bufnr = bufnr })
+    end
+  end
+
+  if cfg.codelens then
+    local ok_codelens, codelens = pcall(function()
+      return vim.lsp.codelens
+    end)
+    if ok_codelens and codelens and type(codelens.refresh) == "function" then
+      local function refresh_codelens()
+        pcall(codelens.refresh, { bufnr = bufnr })
+        if type(codelens.display) == "function" then
+          pcall(codelens.display, { bufnr = bufnr })
+        end
+      end
+      refresh_codelens()
+      local group = vim.api.nvim_create_augroup("JlsCodeLens", { clear = false })
+      vim.api.nvim_create_autocmd({ "BufEnter", "InsertLeave", "BufWritePost" }, {
+        group = group,
+        buffer = bufnr,
+        callback = refresh_codelens,
+      })
+    end
+  end
+end
+
 ---@param state table
 ---@param opts JlsConfig|nil
 ---@return table|nil
@@ -28,7 +86,7 @@ function M.make_lsp_config(state, opts)
     root_dir = function(fname)
       return root.resolve_root(fname, cfg)
     end,
-    settings = cfg.settings,
+    settings = build_settings(cfg),
   }
 end
 
@@ -42,11 +100,13 @@ function M.start(state, opts)
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = config.merge(state.config, opts or {})
   -- Prefer any running JLS client and just attach this buffer (avoids spawning
   -- a new client when jumping into jars in ~/.m2)
   local existing = client_mod.get(nil)
   if existing then
     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
+    on_attach(bufnr, existing, cfg)
     return
   end
 
