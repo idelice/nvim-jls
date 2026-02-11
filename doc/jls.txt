@@ -47,6 +47,9 @@ CONFIGURATION~
   require("jls").setup({
     jls_dir = nil,
     filetypes = { "java" },
+    debounce_text_changes = 200,
+    inlay_hints = false,
+    codelens = false,
     root_markers = {
       "pom.xml",
       "build.gradle",
@@ -57,6 +60,23 @@ CONFIGURATION~
       "WORKSPACE.bazel",
       ".java-version",
       ".git",
+    },
+  })
+<
+
+INLAY HINTS~
+
+`inlay_hints` can be `true` (enable with server defaults) or a table forwarded to
+`settings.java.inlayHints`:
+
+>
+  require("jls").setup({
+    inlay_hints = {
+      enabled = true,
+      parameterNames = true,
+      debounceMs = 250,
+      cacheIdleMs = 120000,
+      cacheMaxEntries = 256,
     },
   })
 <

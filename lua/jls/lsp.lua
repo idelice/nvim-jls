@@ -14,7 +14,13 @@ local function build_settings(cfg)
   local settings = vim.deepcopy(cfg.settings or {})
   if cfg.inlay_hints then
     settings.java = settings.java or {}
-    if settings.java.inlayHints == nil then
+    if type(cfg.inlay_hints) == "table" then
+      local hints = vim.deepcopy(cfg.inlay_hints)
+      if hints.enabled == nil then
+        hints.enabled = true
+      end
+      settings.java.inlayHints = vim.tbl_deep_extend("force", settings.java.inlayHints or {}, hints)
+    elseif settings.java.inlayHints == nil then
       settings.java.inlayHints = { enabled = true }
     end
   end
@@ -83,6 +89,9 @@ function M.make_lsp_config(state, opts)
     name = "jls",
     cmd = cmdline,
     filetypes = cfg.filetypes,
+    flags = {
+      debounce_text_changes = cfg.debounce_text_changes,
+    },
     root_dir = function(fname)
       return root.resolve_root(fname, cfg)
     end,

@@ -44,6 +44,9 @@ JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is 
 require("jls").setup({
   jls_dir = nil,                 -- used to resolve dist/lang_server_*.sh
   filetypes = { "java" },
+  debounce_text_changes = 200,   -- reduce request churn while typing
+  inlay_hints = false,           -- true or table (see below)
+  codelens = false,
   root_markers = {
     "pom.xml",
     "build.gradle",
@@ -57,3 +60,22 @@ require("jls").setup({
   },
 })
 ```
+
+### Inlay hints
+
+`nvim-jls` forwards inlay hint settings to JLS as `settings.java.inlayHints`.
+
+```lua
+require("jls").setup({
+  inlay_hints = {
+    enabled = true,
+    parameterNames = true,
+    debounceMs = 250,
+    cacheIdleMs = 120000,
+    cacheMaxEntries = 256,
+  },
+})
+```
+
+Notes:
+- `inlay_hints = true` enables JLS inlay hints with server defaults.

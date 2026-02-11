@@ -3,7 +3,8 @@
 ---@field filetypes string[]
 ---@field root_markers string[]
 ---@field settings table
----@field inlay_hints boolean
+---@field inlay_hints boolean|table
+---@field debounce_text_changes integer
 ---@field codelens boolean
 
 local M = {}
@@ -26,6 +27,7 @@ function M.default()
     },
     settings = {},
     inlay_hints = false,
+    debounce_text_changes = 200,
     codelens = false,
   }
 end
