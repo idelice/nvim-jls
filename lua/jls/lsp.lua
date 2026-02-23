@@ -8,6 +8,18 @@ local M = {}
 
 local warned_roots = {}
 
+---@param bufnr integer
+---@param enabled boolean
+local function set_inlay_hint_enabled(bufnr, enabled)
+  local ok_hint, hint = pcall(function()
+    return vim.lsp.inlay_hint
+  end)
+  if not ok_hint or not hint or type(hint.enable) ~= "function" then
+    return
+  end
+  pcall(hint.enable, enabled, { bufnr = bufnr })
+end
+
 ---@param cfg JlsConfig
 ---@return table
 local function build_settings(cfg)
@@ -42,11 +54,46 @@ local function on_attach(bufnr, client, cfg)
   end
 
   if cfg.inlay_hints then
-    local ok_hint, hint = pcall(function()
-      return vim.lsp.inlay_hint
-    end)
-    if ok_hint and hint and type(hint.enable) == "function" then
-      pcall(hint.enable, true, { bufnr = bufnr })
+    set_inlay_hint_enabled(bufnr, true)
+    if cfg.inlay_hints_refresh == "insert_leave" then
+      local group = vim.api.nvim_create_augroup("JlsInlayHints" .. bufnr, { clear = true })
+      local seq = 0
+      local debounce_ms = tonumber(cfg.inlay_hints_debounce_ms) or 120
+      if debounce_ms < 0 then
+        debounce_ms = 0
+      end
+      local function schedule_refresh()
+        seq = seq + 1
+        local this_seq = seq
+        vim.defer_fn(function()
+          if this_seq ~= seq then
+            return
+          end
+          set_inlay_hint_enabled(bufnr, true)
+        end, debounce_ms)
+      end
+      vim.api.nvim_create_autocmd("InsertEnter", {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+          seq = seq + 1
+          set_inlay_hint_enabled(bufnr, false)
+        end,
+      })
+      vim.api.nvim_create_autocmd("InsertLeave", {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+          schedule_refresh()
+        end,
+      })
+      vim.api.nvim_create_autocmd("BufEnter", {
+        group = group,
+        buffer = bufnr,
+        callback = function()
+          schedule_refresh()
+        end,
+      })
     end
   end
 

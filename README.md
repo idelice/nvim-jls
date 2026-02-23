@@ -46,6 +46,8 @@ require("jls").setup({
   filetypes = { "java" },
   debounce_text_changes = 200,   -- reduce request churn while typing
   inlay_hints = false,           -- true or table (see below)
+  inlay_hints_refresh = "auto",  -- "auto" | "insert_leave"
+  inlay_hints_debounce_ms = 120, -- used when inlay_hints_refresh = "insert_leave"
   codelens = false,
   root_markers = {
     "pom.xml",
@@ -79,3 +81,6 @@ require("jls").setup({
 
 Notes:
 - `inlay_hints = true` enables JLS inlay hints with server defaults.
+- `inlay_hints_refresh = "auto"` uses Neovim's default inlay-hint refresh behavior.
+- `inlay_hints_refresh = "insert_leave"` disables inlay hints while typing and refreshes once after insert mode.
+- `inlay_hints_debounce_ms` controls the post-insert refresh delay in `"insert_leave"` mode.

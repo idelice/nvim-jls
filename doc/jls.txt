@@ -49,6 +49,8 @@ CONFIGURATION~
     filetypes = { "java" },
     debounce_text_changes = 200,
     inlay_hints = false,
+    inlay_hints_refresh = "auto",
+    inlay_hints_debounce_ms = 120,
     codelens = false,
     root_markers = {
       "pom.xml",
@@ -80,3 +82,10 @@ INLAY HINTS~
     },
   })
 <
+
+`inlay_hints_refresh` controls client-side inlay hint update behavior:
+- `"auto"`: use Neovim's default refresh behavior.
+- `"insert_leave"`: disable hints while typing and refresh after leaving insert mode.
+
+`inlay_hints_debounce_ms` sets the delayed refresh in milliseconds when using
+`"insert_leave"` mode.

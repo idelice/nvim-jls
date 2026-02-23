@@ -4,6 +4,8 @@
 ---@field root_markers string[]
 ---@field settings table
 ---@field inlay_hints boolean|table
+---@field inlay_hints_refresh "auto"|"insert_leave"
+---@field inlay_hints_debounce_ms integer
 ---@field debounce_text_changes integer
 ---@field codelens boolean
 
@@ -27,6 +29,8 @@ function M.default()
     },
     settings = {},
     inlay_hints = false,
+    inlay_hints_refresh = "auto",
+    inlay_hints_debounce_ms = 120,
     debounce_text_changes = 200,
     codelens = false,
   }
