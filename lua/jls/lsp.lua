@@ -3,22 +3,11 @@ local config = require("jls.config")
 local root = require("jls.root")
 local util = require("jls.util")
 local client_mod = require("jls.client")
+local inlay_hints = require("jls.inlay_hints")
 
 local M = {}
 
 local warned_roots = {}
-
----@param bufnr integer
----@param enabled boolean
-local function set_inlay_hint_enabled(bufnr, enabled)
-  local ok_hint, hint = pcall(function()
-    return vim.lsp.inlay_hint
-  end)
-  if not ok_hint or not hint or type(hint.enable) ~= "function" then
-    return
-  end
-  pcall(hint.enable, enabled, { bufnr = bufnr })
-end
 
 ---@param cfg JlsConfig
 ---@return table
@@ -54,47 +43,7 @@ local function on_attach(bufnr, client, cfg)
   end
 
   if cfg.inlay_hints then
-    set_inlay_hint_enabled(bufnr, true)
-    if cfg.inlay_hints_refresh == "insert_leave" then
-      local group = vim.api.nvim_create_augroup("JlsInlayHints" .. bufnr, { clear = true })
-      local seq = 0
-      local debounce_ms = tonumber(cfg.inlay_hints_debounce_ms) or 120
-      if debounce_ms < 0 then
-        debounce_ms = 0
-      end
-      local function schedule_refresh()
-        seq = seq + 1
-        local this_seq = seq
-        vim.defer_fn(function()
-          if this_seq ~= seq then
-            return
-          end
-          set_inlay_hint_enabled(bufnr, true)
-        end, debounce_ms)
-      end
-      vim.api.nvim_create_autocmd("InsertEnter", {
-        group = group,
-        buffer = bufnr,
-        callback = function()
-          seq = seq + 1
-          set_inlay_hint_enabled(bufnr, false)
-        end,
-      })
-      vim.api.nvim_create_autocmd("InsertLeave", {
-        group = group,
-        buffer = bufnr,
-        callback = function()
-          schedule_refresh()
-        end,
-      })
-      vim.api.nvim_create_autocmd("BufEnter", {
-        group = group,
-        buffer = bufnr,
-        callback = function()
-          schedule_refresh()
-        end,
-      })
-    end
+    inlay_hints.attach(bufnr, client, cfg)
   end
 
   if cfg.codelens then
@@ -136,6 +85,9 @@ function M.make_lsp_config(state, opts)
     name = "jls",
     cmd = cmdline,
     filetypes = cfg.filetypes,
+    on_attach = function(client, bufnr)
+      on_attach(bufnr, client, cfg)
+    end,
     flags = {
       debounce_text_changes = cfg.debounce_text_changes,
     },
