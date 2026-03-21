@@ -46,7 +46,6 @@ CONFIGURATION~
 >
   require("jls").setup({
     jls_dir = nil,
-    debounce_text_changes = 200,
     codelens = false,
     root_markers = {
       "pom.xml",

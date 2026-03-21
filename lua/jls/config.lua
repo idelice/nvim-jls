@@ -2,7 +2,6 @@
 ---@field jls_dir string|nil Path to JLS install root containing dist/
 ---@field root_markers string[]
 ---@field settings table
----@field debounce_text_changes integer
 ---@field codelens boolean
 
 local M = {}
@@ -23,7 +22,6 @@ function M.default()
       ".git",
     },
     settings = {},
-    debounce_text_changes = 200,
     codelens = false,
   }
 end

@@ -70,9 +70,6 @@ function M.make_lsp_config(state, opts)
     on_attach = function(client, bufnr)
       on_attach(bufnr, client, cfg)
     end,
-    flags = {
-      debounce_text_changes = cfg.debounce_text_changes,
-    },
     root_dir = function(fname)
       return root.resolve_root(fname, cfg)
     end,

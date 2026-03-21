@@ -43,7 +43,6 @@ JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is 
 ```lua
 require("jls").setup({
   jls_dir = nil,                 -- used to resolve dist/lang_server_*.sh
-  debounce_text_changes = 200,   -- reduce request churn while typing
   codelens = false,
   root_markers = {
     "pom.xml",
