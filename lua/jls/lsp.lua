@@ -8,6 +8,21 @@ local M = {}
 
 local warned_roots = {}
 
+---@param cfg JlsConfig
+---@return table
+local function build_settings(cfg)
+  return vim.deepcopy(cfg.settings or {})
+end
+
+---@param bufnr integer
+---@param client table|nil
+---@param cfg JlsConfig
+local function on_attach(bufnr, client, cfg)
+  if not client or client.name ~= "jls" then
+    return
+  end
+end
+
 ---@param state table
 ---@param opts JlsConfig|nil
 ---@return table|nil
@@ -24,11 +39,13 @@ function M.make_lsp_config(state, opts)
   return {
     name = "jls",
     cmd = cmdline,
-    filetypes = cfg.filetypes,
+    on_attach = function(client, bufnr)
+      on_attach(bufnr, client, cfg)
+    end,
     root_dir = function(fname)
       return root.resolve_root(fname, cfg)
     end,
-    settings = cfg.settings,
+    settings = build_settings(cfg),
   }
 end
 
@@ -42,11 +59,13 @@ function M.start(state, opts)
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = config.merge(state.config, opts or {})
   -- Prefer any running JLS client and just attach this buffer (avoids spawning
   -- a new client when jumping into jars in ~/.m2)
   local existing = client_mod.get(nil)
   if existing then
     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
+    on_attach(bufnr, existing, cfg)
     return
   end
 

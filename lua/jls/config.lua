@@ -1,6 +1,5 @@
 ---@class JlsConfig
 ---@field jls_dir string|nil Path to JLS install root containing dist/
----@field filetypes string[]
 ---@field root_markers string[]
 ---@field settings table
 
@@ -10,7 +9,6 @@ local M = {}
 function M.default()
   return {
     jls_dir = nil,
-    filetypes = { "java" },
     root_markers = {
       "pom.xml",
       "build.gradle",

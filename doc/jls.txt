@@ -46,7 +46,6 @@ CONFIGURATION~
 >
   require("jls").setup({
     jls_dir = nil,
-    filetypes = { "java" },
     root_markers = {
       "pom.xml",
       "build.gradle",
