@@ -11,14 +11,7 @@ local warned_roots = {}
 ---@param cfg JlsConfig
 ---@return table
 local function build_settings(cfg)
-  local settings = vim.deepcopy(cfg.settings or {})
-  if cfg.codelens then
-    settings.java = settings.java or {}
-    if settings.java.codeLens == nil and settings.java.codelens == nil then
-      settings.java.codeLens = true
-    end
-  end
-  return settings
+  return vim.deepcopy(cfg.settings or {})
 end
 
 ---@param bufnr integer
@@ -27,27 +20,6 @@ end
 local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
-  end
-
-  if cfg.codelens then
-    local ok_codelens, codelens = pcall(function()
-      return vim.lsp.codelens
-    end)
-    if ok_codelens and codelens and type(codelens.refresh) == "function" then
-      local function refresh_codelens()
-        pcall(codelens.refresh, { bufnr = bufnr })
-        if type(codelens.display) == "function" then
-          pcall(codelens.display, { bufnr = bufnr })
-        end
-      end
-      refresh_codelens()
-      local group = vim.api.nvim_create_augroup("JlsCodeLens", { clear = false })
-      vim.api.nvim_create_autocmd({ "BufEnter", "InsertLeave", "BufWritePost" }, {
-        group = group,
-        buffer = bufnr,
-        callback = refresh_codelens,
-      })
-    end
   end
 end
 

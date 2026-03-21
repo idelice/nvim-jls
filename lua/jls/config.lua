@@ -2,7 +2,6 @@
 ---@field jls_dir string|nil Path to JLS install root containing dist/
 ---@field root_markers string[]
 ---@field settings table
----@field codelens boolean
 
 local M = {}
 
@@ -22,7 +21,6 @@ function M.default()
       ".git",
     },
     settings = {},
-    codelens = false,
   }
 end
 
