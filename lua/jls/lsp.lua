@@ -3,7 +3,6 @@ local config = require("jls.config")
 local root = require("jls.root")
 local util = require("jls.util")
 local client_mod = require("jls.client")
-local inlay_hints = require("jls.inlay_hints")
 
 local M = {}
 
@@ -13,18 +12,6 @@ local warned_roots = {}
 ---@return table
 local function build_settings(cfg)
   local settings = vim.deepcopy(cfg.settings or {})
-  if cfg.inlay_hints then
-    settings.java = settings.java or {}
-    if type(cfg.inlay_hints) == "table" then
-      local hints = vim.deepcopy(cfg.inlay_hints)
-      if hints.enabled == nil then
-        hints.enabled = true
-      end
-      settings.java.inlayHints = vim.tbl_deep_extend("force", settings.java.inlayHints or {}, hints)
-    elseif settings.java.inlayHints == nil then
-      settings.java.inlayHints = { enabled = true }
-    end
-  end
   if cfg.codelens then
     settings.java = settings.java or {}
     if settings.java.codeLens == nil and settings.java.codelens == nil then
@@ -40,10 +27,6 @@ end
 local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
-  end
-
-  if cfg.inlay_hints then
-    inlay_hints.attach(bufnr, client, cfg)
   end
 
   if cfg.codelens then
@@ -84,7 +67,6 @@ function M.make_lsp_config(state, opts)
   return {
     name = "jls",
     cmd = cmdline,
-    filetypes = cfg.filetypes,
     on_attach = function(client, bufnr)
       on_attach(bufnr, client, cfg)
     end,

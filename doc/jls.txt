@@ -46,11 +46,7 @@ CONFIGURATION~
 >
   require("jls").setup({
     jls_dir = nil,
-    filetypes = { "java" },
     debounce_text_changes = 200,
-    inlay_hints = false,
-    inlay_hints_refresh = "auto",
-    inlay_hints_debounce_ms = 120,
     codelens = false,
     root_markers = {
       "pom.xml",
@@ -65,30 +61,3 @@ CONFIGURATION~
     },
   })
 <
-
-INLAY HINTS~
-
-`inlay_hints` can be `true` (enable with server defaults) or a table forwarded to
-`settings.java.inlayHints`:
-
->
-  require("jls").setup({
-    inlay_hints = {
-      enabled = true,
-      parameterNames = true,
-      debounceMs = 250,
-      cacheIdleMs = 120000,
-      cacheMaxEntries = 256,
-    },
-  })
-<
-
-`inlay_hints_refresh` controls client-side inlay hint update behavior:
-- `"auto"`: request full-file hints once after startup or index refresh, then
-  refresh the visible range.
-- `"insert_leave"`: request full-file hints once after startup or index
-  refresh, hide hints while typing, then refresh the visible range after
-  leaving insert mode.
-
-`inlay_hints_debounce_ms` sets the delayed refresh in milliseconds when using
-`"insert_leave"` mode.

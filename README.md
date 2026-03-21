@@ -43,11 +43,7 @@ JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is 
 ```lua
 require("jls").setup({
   jls_dir = nil,                 -- used to resolve dist/lang_server_*.sh
-  filetypes = { "java" },
   debounce_text_changes = 200,   -- reduce request churn while typing
-  inlay_hints = false,           -- true or table (see below)
-  inlay_hints_refresh = "auto",  -- "auto" | "insert_leave"
-  inlay_hints_debounce_ms = 120, -- used when inlay_hints_refresh = "insert_leave"
   codelens = false,
   root_markers = {
     "pom.xml",
@@ -62,25 +58,3 @@ require("jls").setup({
   },
 })
 ```
-
-### Inlay hints
-
-`nvim-jls` forwards inlay hint settings to JLS as `settings.java.inlayHints`.
-
-```lua
-require("jls").setup({
-  inlay_hints = {
-    enabled = true,
-    parameterNames = true,
-    debounceMs = 250,
-    cacheIdleMs = 120000,
-    cacheMaxEntries = 256,
-  },
-})
-```
-
-Notes:
-- `inlay_hints = true` enables JLS inlay hints with server defaults.
-- `inlay_hints_refresh = "auto"` requests full-file hints once after startup or index refresh, then refreshes the visible range while editing.
-- `inlay_hints_refresh = "insert_leave"` requests full-file hints once after startup or index refresh, hides hints while typing, then refreshes the visible range on insert leave.
-- `inlay_hints_debounce_ms` controls the post-insert refresh delay in `"insert_leave"` mode.
