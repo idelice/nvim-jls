@@ -2,7 +2,7 @@ local util = require("jls.util")
 
 local M = {}
 
-function M.build_cmd(cfg)
+function M.build_cmd(cfg, _root_dir)
   local jls_dir = cfg.jls_dir
   if not jls_dir or jls_dir == "" then
     return nil, "jls_dir is not set"
@@ -17,7 +17,7 @@ function M.build_cmd(cfg)
     return nil, "JLS launcher not found: " .. launcher
   end
 
-  return { launcher }
+  return { launcher }, nil, nil
 end
 
 return M

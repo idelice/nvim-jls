@@ -2,11 +2,19 @@ local cmd = require("jls.cmd")
 local config = require("jls.config")
 local root = require("jls.root")
 local util = require("jls.util")
-local client_mod = require("jls.client")
 
 local M = {}
 
 local warned_roots = {}
+
+local function find_client_for_root(root_dir)
+  for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
+    if client.config and client.config.root_dir == root_dir then
+      return client
+    end
+  end
+  return nil
+end
 
 ---@param cfg JlsConfig
 ---@return table
@@ -30,15 +38,16 @@ end
 function M.make_lsp_config(state, opts)
   local cfg = config.merge(state.config, opts or {})
   local root_dir, _ = root.resolve_root_info(vim.api.nvim_buf_get_name(0), cfg)
-  local cmdline, err = cmd.build_cmd(cfg)
+  local cmdline, cmd_env = cmd.build_cmd(cfg, root_dir)
   if not cmdline then
-    return nil, err
+    return nil, cmd_env
   end
 
   state._last_resolved_cfg = cfg
   return {
     name = "jls",
     cmd = cmdline,
+    cmd_env = cmd_env,
     on_attach = function(client, bufnr)
       on_attach(bufnr, client, cfg)
     end,
@@ -60,18 +69,16 @@ function M.start(state, opts)
 
   local bufnr = vim.api.nvim_get_current_buf()
   local cfg = config.merge(state.config, opts or {})
-  -- Prefer any running JLS client and just attach this buffer (avoids spawning
-  -- a new client when jumping into jars in ~/.m2)
-  local existing = client_mod.get(nil)
+  local root_dir = lsp_config.root_dir
+  if type(root_dir) == "function" then
+    root_dir = root_dir(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
+  end
+
+  local existing = find_client_for_root(root_dir)
   if existing then
     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
     on_attach(bufnr, existing, cfg)
     return
-  end
-
-  local root_dir = lsp_config.root_dir
-  if type(root_dir) == "function" then
-    root_dir = root_dir(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
   end
 
   local _, fallback = root.resolve_root_info(vim.api.nvim_buf_get_name(0), state.config)
@@ -117,13 +124,15 @@ end
 
 ---@param _state table
 function M.stop(_state)
-  local client = client_mod.get(nil)
-  if not client then
+  local clients = vim.lsp.get_clients({ name = "jls" })
+  if #clients == 0 then
     util.notify("JLS: no running clients", vim.log.levels.WARN)
     return
   end
-  client:stop(true)
-  util.notify("JLS: stopped", vim.log.levels.INFO)
+  for _, client in ipairs(clients) do
+    client:stop(true)
+  end
+  util.notify("JLS: stopped " .. tostring(#clients) .. " client(s)", vim.log.levels.INFO)
 end
 
 ---@param state table
@@ -139,7 +148,7 @@ end
 function M.doctor(state)
   local cfg = config.merge(state.config)
   local root_dir, fallback = root.resolve_root_info(vim.api.nvim_buf_get_name(0), cfg)
-  local cmdline, err = cmd.build_cmd(cfg)
+  local cmdline, cmd_env_or_err = cmd.build_cmd(cfg, root_dir)
   local lines = {
     "JLS Doctor",
     "root: " .. root_dir,
@@ -149,8 +158,9 @@ function M.doctor(state)
   }
   if cmdline then
     table.insert(lines, "cmd: " .. table.concat(cmdline, " "))
+    table.insert(lines, "cmd_env: " .. vim.inspect(cmd_env_or_err or {}))
   else
-    table.insert(lines, "cmd: <error> " .. (err or "unknown"))
+    table.insert(lines, "cmd: <error> " .. (cmd_env_or_err or "unknown"))
   end
   util.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end

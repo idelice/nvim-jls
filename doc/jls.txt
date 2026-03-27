@@ -24,6 +24,7 @@ SETUP~
 >
   require("jls").setup({
     jls_dir = "/path/to/jls",
+    settings = {},
   })
 <
 
@@ -46,6 +47,7 @@ CONFIGURATION~
 >
   require("jls").setup({
     jls_dir = nil,
+    settings = {},
     root_markers = {
       "pom.xml",
       "build.gradle",
@@ -59,3 +61,11 @@ CONFIGURATION~
     },
   })
 <
+
+nvim-jls does not choose the server JVM. It launches the packaged JLS launcher
+and passes through any LSP settings you configure. The current JLS distribution
+is built for Java 25 and runs on its packaged Java 25 runtime.
+
+`settings.java.configuration.runtimes` may still be sent to JLS in the LSP
+configuration payload, but nvim-jls does not use that list to decide how the
+server process is started.

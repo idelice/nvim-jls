@@ -25,6 +25,7 @@ JLS is not currently listed in nvim-lspconfig or mason because it does not meet 
   "idelice/nvim-jls",
   opts = {
     jls_dir = "/path/to/jls", -- must contain dist/lang_server_*.sh
+    settings = {},
   },
 }
 ```
@@ -57,3 +58,11 @@ require("jls").setup({
   },
 })
 ```
+
+`nvim-jls` does not choose the server JVM. It launches the packaged JLS
+launcher and passes through any LSP settings you configure. The current JLS
+distribution is built for Java 25 and runs on its packaged Java 25 runtime.
+
+`settings.java.configuration.runtimes` may still be sent to JLS as part of the
+LSP configuration payload, but `nvim-jls` does not use that list to decide how
+the server process is started.
