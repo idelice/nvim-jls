@@ -18,7 +18,8 @@ local function configure_external_source_buffer(bufnr)
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].bufhidden = "wipe"
+  vim.bo[bufnr].bufhidden = "hide"
+  vim.bo[bufnr].buflisted = false
   vim.bo[bufnr].filetype = "java"
 end
 
