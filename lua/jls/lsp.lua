@@ -6,6 +6,7 @@ local util = require("jls.util")
 local M = {}
 
 local warned_roots = {}
+local shown_server_messages = {}
 
 local function find_client_for_root(root_dir)
   for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
@@ -14,6 +15,38 @@ local function find_client_for_root(root_dir)
     end
   end
   return nil
+end
+
+local function show_message_level(message_type)
+  if message_type == vim.lsp.protocol.MessageType.Error then
+    return vim.log.levels.ERROR
+  elseif message_type == vim.lsp.protocol.MessageType.Warning then
+    return vim.log.levels.WARN
+  elseif message_type == vim.lsp.protocol.MessageType.Info then
+    return vim.log.levels.INFO
+  end
+  return vim.log.levels.DEBUG
+end
+
+local function show_message_handler(root_dir)
+  return function(err, result, ctx, handler_cfg)
+    if err then
+      return vim.lsp.handlers["window/showMessage"](err, result, ctx, handler_cfg)
+    end
+    if not result or not result.message then
+      return
+    end
+
+    if result.type == vim.lsp.protocol.MessageType.Warning then
+      local key = table.concat({ root_dir or "", tostring(result.type), result.message }, "\0")
+      if shown_server_messages[key] then
+        return
+      end
+      shown_server_messages[key] = true
+    end
+
+    util.notify(result.message, show_message_level(result.type))
+  end
 end
 
 ---@param cfg JlsConfig
@@ -48,6 +81,9 @@ function M.make_lsp_config(state, opts)
     name = "jls",
     cmd = cmdline,
     cmd_env = cmd_env,
+    handlers = {
+      ["window/showMessage"] = show_message_handler(root_dir),
+    },
     on_attach = function(client, bufnr)
       on_attach(bufnr, client, cfg)
     end,
