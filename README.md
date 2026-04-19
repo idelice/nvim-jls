@@ -37,7 +37,8 @@ JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is 
 - `:JlsStart` – start JLS for the current buffer
 - `:JlsRestart` – restart JLS
 - `:JlsStop` – stop all JLS clients
-- `:JlsDoctor` – show effective config and diagnostics
+- `:JlsLog` – open Neovim's LSP log in a read-only buffer
+- `:checkhealth jls` – run the built-in health check
 
 ## Configuration
 
@@ -56,6 +57,9 @@ require("jls").setup({
     ".java-version",
     ".git",
   },
+  inlay_hints = {
+    enabled = false,             -- show parameter name hints at call sites
+  },
 })
 ```
 
@@ -66,3 +70,15 @@ distribution is built for Java 25 and runs on its packaged Java 25 runtime.
 `settings.java.configuration.runtimes` may still be sent to JLS as part of the
 LSP configuration payload, but `nvim-jls` does not use that list to decide how
 the server process is started.
+
+## Inlay hints
+
+Enable parameter name hints at call sites:
+
+```lua
+require("jls").setup({
+  inlay_hints = { enabled = true },
+})
+```
+
+Hints appear only for files in your workspace. JDK and dependency sources opened via go-to-definition are not annotated.

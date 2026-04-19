@@ -21,7 +21,7 @@ end
 
 ---@param opts JlsConfig|nil
 function M.start(opts)
-  lsp.start(state, opts)
+  lsp.start(state, opts, { notify = true })
 end
 
 function M.stop()
@@ -30,11 +30,11 @@ end
 
 ---@param opts JlsConfig|nil
 function M.restart(opts)
-  lsp.restart(state, opts)
+  lsp.restart(state, opts, { notify = true })
 end
 
-function M.doctor()
-  lsp.doctor(state)
+function M.log()
+  lsp.open_log()
 end
 
 ---@param args JlsConfig|nil

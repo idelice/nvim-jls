@@ -2,6 +2,7 @@
 ---@field jls_dir string|nil Path to JLS install root containing dist/
 ---@field root_markers string[]
 ---@field settings table
+---@field inlay_hints { enabled: boolean }
 
 local M = {}
 
@@ -21,6 +22,9 @@ function M.default()
       ".git",
     },
     settings = {},
+    inlay_hints = {
+      enabled = false,
+    },
   }
 end
 

@@ -38,7 +38,9 @@ COMMANDS~
 :JlsStart       Start JLS for the current buffer.
 :JlsRestart     Restart JLS.
 :JlsStop        Stop all running JLS clients.
-:JlsDoctor      Show effective config and diagnostics.
+:JlsLog         Open Neovim's LSP log in a read-only buffer.
+:checkhealth jls
+                Run the built-in health check for nvim-jls.
 
 CONFIGURATION~
 
@@ -59,6 +61,9 @@ CONFIGURATION~
       ".java-version",
       ".git",
     },
+    inlay_hints = {
+      enabled = false,
+    },
   })
 <
 
@@ -69,3 +74,23 @@ is built for Java 25 and runs on its packaged Java 25 runtime.
 `settings.java.configuration.runtimes` may still be sent to JLS in the LSP
 configuration payload, but nvim-jls does not use that list to decide how the
 server process is started.
+
+INLAY HINTS~
+
+*jls-inlay-hints*
+
+Enable parameter name hints at call sites:
+
+>
+  require("jls").setup({
+    inlay_hints = { enabled = true },
+  })
+<
+
+Hints appear only for files in your workspace. JDK and dependency sources
+opened via go-to-definition are not annotated.
+
+To customise the appearance, override the highlight group in your colorscheme:
+>
+  vim.api.nvim_set_hl(0, "LspInlayHint", { fg = "#888888", italic = true })
+<

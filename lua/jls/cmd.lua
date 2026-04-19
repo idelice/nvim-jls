@@ -2,7 +2,7 @@ local util = require("jls.util")
 
 local M = {}
 
-function M.build_cmd(cfg, _root_dir)
+function M.resolve_launcher(cfg)
   local jls_dir = cfg.jls_dir
   if not jls_dir or jls_dir == "" then
     return nil, "jls_dir is not set"
@@ -15,6 +15,25 @@ function M.build_cmd(cfg, _root_dir)
 
   if vim.fn.filereadable(launcher) == 0 then
     return nil, "JLS launcher not found: " .. launcher
+  end
+
+  return launcher, nil
+end
+
+function M.is_executable(launcher)
+  if not launcher or launcher == "" then
+    return false
+  end
+  if util.detect_os() == "windows" then
+    return true
+  end
+  return vim.fn.executable(launcher) == 1
+end
+
+function M.build_cmd(cfg, _root_dir)
+  local launcher, err = M.resolve_launcher(cfg)
+  if not launcher then
+    return nil, err
   end
 
   return { launcher }, nil, nil

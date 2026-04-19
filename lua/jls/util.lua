@@ -22,8 +22,9 @@ function M.notify(msg, level)
   local lvl = level or vim.log.levels.INFO
   local ok, snacks = pcall(require, "snacks")
   if ok and snacks.notify then
-    -- Prefer Snacks if available
-    pcall(snacks.notify, msg, lvl, { title = "jls" })
+    -- snacks.notify(msg, opts) — level must be inside the opts table,
+    -- NOT as a bare second argument (which snacks ignores as a non-table).
+    pcall(snacks.notify, msg, { level = lvl, title = "jls" })
     return
   end
   pcall(vim.notify, msg, lvl, { title = "jls" })
