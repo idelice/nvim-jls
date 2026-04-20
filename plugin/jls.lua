@@ -12,6 +12,6 @@ vim.api.nvim_create_user_command("JlsStop", function()
   jls.stop()
 end, {})
 
-vim.api.nvim_create_user_command("JlsDoctor", function()
-  jls.doctor()
+vim.api.nvim_create_user_command("JlsLog", function()
+  jls.log()
 end, {})

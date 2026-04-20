@@ -7,6 +7,9 @@ local M = {}
 
 local warned_roots = {}
 local shown_server_messages = {}
+local recent_server_messages = {}
+
+local MAX_RECORDED_SERVER_MESSAGES = 20
 
 local function find_client_for_root(root_dir)
   for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
@@ -15,6 +18,83 @@ local function find_client_for_root(root_dir)
     end
   end
   return nil
+end
+
+local function get_lsp_log_path()
+  local ok, path = pcall(vim.lsp.get_log_path)
+  if ok then
+    return path
+  end
+  return nil
+end
+
+local function record_server_message(root_dir, result)
+  if not result or not result.message then
+    return
+  end
+  table.insert(recent_server_messages, {
+    root_dir = root_dir,
+    type = result.type,
+    message = result.message,
+  })
+  if #recent_server_messages > MAX_RECORDED_SERVER_MESSAGES then
+    table.remove(recent_server_messages, 1)
+  end
+end
+
+local function recent_messages_for_root(root_dir)
+  local items = {}
+  for i = #recent_server_messages, 1, -1 do
+    local item = recent_server_messages[i]
+    if item.root_dir == root_dir then
+      table.insert(items, item)
+    end
+  end
+  return items
+end
+
+local function recent_stderr_warnings(log_path, launcher)
+  if not log_path or log_path == "" or not launcher or launcher == "" then
+    return {}
+  end
+  local ok, lines = pcall(vim.fn.readfile, log_path)
+  if not ok or type(lines) ~= "table" then
+    return {}
+  end
+
+  local warnings = {}
+  for i = #lines, 1, -1 do
+    local line = lines[i]
+    if line:find('"rpc"', 1, true)
+        and line:find(launcher, 1, true)
+        and line:find('"stderr"', 1, true)
+        and line:find("WARNING", 1, true) then
+      local payload = line:match([["stderr"%s+"(.*)"]]) or line
+      payload = payload:gsub([[\n]], "\n")
+      payload = payload:gsub([[\t]], "\t")
+      payload = payload:gsub('\\"', '"')
+      if not vim.tbl_contains(warnings, payload) then
+        table.insert(warnings, payload)
+      end
+      if #warnings >= 5 then
+        break
+      end
+    end
+  end
+
+  return warnings
+end
+
+function M.get_recent_server_messages(root_dir)
+  return vim.deepcopy(recent_messages_for_root(root_dir))
+end
+
+function M.get_lsp_log_path()
+  return get_lsp_log_path()
+end
+
+function M.get_recent_stderr_warnings(log_path, launcher)
+  return vim.deepcopy(recent_stderr_warnings(log_path, launcher))
 end
 
 local function show_message_level(message_type)
@@ -36,6 +116,8 @@ local function show_message_handler(root_dir)
     if not result or not result.message then
       return
     end
+
+    record_server_message(root_dir, result)
 
     if result.type == vim.lsp.protocol.MessageType.Warning then
       local key = table.concat({ root_dir or "", tostring(result.type), result.message }, "\0")
@@ -62,6 +144,176 @@ local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
   end
+
+  -- Neovim's default pull-diagnostic trigger fires on every textDocument/didChange
+  -- (debounced at ~150ms), causing a full javac compile on each keystroke.
+  -- Clearing diagnosticProvider before vim.schedule runs the capability setup
+  -- prevents Neovim from attaching its LspNotify/didChange → diagnostic pull
+  -- machinery for this buffer entirely.
+  client.server_capabilities.diagnosticProvider = nil
+
+  local augroup = "JlsDiagnostics_" .. bufnr
+  local group = vim.api.nvim_create_augroup(augroup, { clear = true })
+  local ns = vim.lsp.diagnostic.get_namespace(client.id)
+
+  local function request_diagnostics()
+    -- client:request flushes pending didChange first so the server always
+    -- compiles the current buffer content.
+    -- We supply our own handler instead of nil: passing nil would route the
+    -- response through Neovim's default textDocument/diagnostic handler, which
+    -- expects internal bufstate that was never initialised (because we cleared
+    -- diagnosticProvider above) and crashes with "attempt to index bufstate".
+    client:request(
+      "textDocument/diagnostic",
+      { textDocument = vim.lsp.util.make_text_document_params(bufnr) },
+      function(err, result)
+        if err or not result or result.kind ~= "full" then
+          return
+        end
+        local nvim_diags = {}
+        for _, d in ipairs(result.items or {}) do
+          table.insert(nvim_diags, {
+            lnum = d.range.start.line,
+            end_lnum = d.range["end"].line,
+            col = d.range.start.character,
+            end_col = d.range["end"].character,
+            severity = d.severity,
+            message = d.message,
+            source = d.source,
+            code = d.code,
+          })
+        end
+        vim.diagnostic.set(ns, bufnr, nvim_diags)
+      end,
+      bufnr
+    )
+  end
+
+  local DEBOUNCE_MS = 500
+  local timer = vim.uv.new_timer()
+
+  -- Inlay hints state: defined before client_ready so request_hints is in scope.
+  local request_hints
+  if cfg.inlay_hints and cfg.inlay_hints.enabled then
+    local hint_ns = vim.api.nvim_create_namespace("jls_inlay_hints_" .. bufnr)
+
+    local function clear_hints()
+      vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, 0, -1)
+    end
+
+    local function apply_hints(hints)
+      clear_hints()
+      for _, hint in ipairs(hints) do
+        local label = hint.label
+        if hint.paddingRight then
+          label = label .. " "
+        end
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, hint_ns, hint.position.line, hint.position.character, {
+          virt_text = { { label, "LspInlayHint" } },
+          virt_text_pos = "inline",
+          hl_mode = "combine",
+        })
+      end
+    end
+
+    local hint_pending = false
+    request_hints = function()
+      if hint_pending or not vim.api.nvim_buf_is_valid(bufnr) then return end
+      hint_pending = true
+      local line_count = vim.api.nvim_buf_line_count(bufnr)
+      client:request(
+        "textDocument/inlayHint",
+        {
+          textDocument = vim.lsp.util.make_text_document_params(bufnr),
+          range = {
+            start = { line = 0, character = 0 },
+            ["end"] = { line = line_count, character = 0 },
+          },
+        },
+        function(err, result)
+          hint_pending = false
+          if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then return end
+          apply_hints(result)
+        end,
+        bufnr
+      )
+    end
+  end
+
+  -- on_attach IS the client-ready signal. Register autocmds and fire initial
+  -- requests here directly — no vim.schedule needed.
+  local function client_ready()
+    vim.api.nvim_create_autocmd("TextChanged", {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        timer:stop()
+        timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(request_diagnostics))
+      end,
+    })
+    vim.api.nvim_create_autocmd({ "InsertLeave", "BufWritePost" }, {
+      group = group,
+      buffer = bufnr,
+      callback = request_diagnostics,
+    })
+    vim.api.nvim_create_autocmd("BufEnter", {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        local win = vim.api.nvim_get_current_win()
+        if vim.api.nvim_win_get_config(win).relative ~= "" then return end
+        request_diagnostics()
+      end,
+    })
+
+    if request_hints then
+      local bufname = vim.api.nvim_buf_get_name(bufnr)
+      local root_dir = client.root_dir or ""
+      if bufname:sub(1, #root_dir) == root_dir then
+        vim.api.nvim_create_autocmd("InsertLeave", {
+          group = group,
+          buffer = bufnr,
+          callback = request_hints,
+        })
+        vim.api.nvim_create_autocmd("BufEnter", {
+          group = group,
+          buffer = bufnr,
+          callback = function()
+            local win = vim.api.nvim_get_current_win()
+            if vim.api.nvim_win_get_config(win).relative ~= "" then return end
+            if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then
+              request_hints()
+            end
+          end,
+        })
+      end
+    end
+
+    request_diagnostics()
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    local root_dir = client.root_dir or ""
+    if request_hints and bufname:sub(1, #root_dir) == root_dir then
+      request_hints()
+    end
+  end
+
+  client_ready()
+
+  -- Clean up timer and autocmds when jls detaches from this buffer.
+  vim.api.nvim_create_autocmd("LspDetach", {
+    group = group,
+    buffer = bufnr,
+    once = true,
+    callback = function(ev)
+      if ev.data.client_id == client.id then
+        if not timer:is_closing() then
+          timer:stop()
+          timer:close()
+        end
+        pcall(vim.api.nvim_del_augroup_by_name, augroup)
+      end
+    end,
+  })
 end
 
 ---@param state table
@@ -96,7 +348,8 @@ end
 
 ---@param state table
 ---@param opts JlsConfig|nil
-function M.start(state, opts)
+---@param control? { notify?: boolean }
+function M.start(state, opts, control)
   local lsp_config, err = M.make_lsp_config(state, opts)
   if not lsp_config then
     util.notify(err or "JLS configuration failed", vim.log.levels.ERROR)
@@ -113,7 +366,6 @@ function M.start(state, opts)
   local existing = find_client_for_root(root_dir)
   if existing then
     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
-    on_attach(bufnr, existing, cfg)
     return
   end
 
@@ -143,6 +395,9 @@ function M.start(state, opts)
     callback = function(args)
       local client = vim.lsp.get_client_by_id(args.data.client_id)
       if client and client.name == "jls" then
+        if control and control.notify then
+          util.notify("JLS: started", vim.log.levels.INFO)
+        end
         vim.api.nvim_del_augroup_by_id(group)
       end
     end,
@@ -173,32 +428,49 @@ end
 
 ---@param state table
 ---@param opts JlsConfig|nil
-function M.restart(state, opts)
+---@param control? { notify?: boolean }
+function M.restart(state, opts, control)
+  local target_bufnr = vim.api.nvim_get_current_buf()
   M.stop(state)
-  vim.defer_fn(function()
-    M.start(state, opts)
-  end, 50)
+
+  local attempts = 0
+  local max_attempts = 50
+
+  local function restart_when_stopped()
+    if #vim.lsp.get_clients({ name = "jls" }) > 0 and attempts < max_attempts then
+      attempts = attempts + 1
+      vim.defer_fn(restart_when_stopped, 100)
+      return
+    end
+
+    if vim.api.nvim_buf_is_valid(target_bufnr) then
+      vim.api.nvim_buf_call(target_bufnr, function()
+        M.start(state, opts, control)
+      end)
+      return
+    end
+
+    M.start(state, opts, control)
+  end
+
+  vim.defer_fn(restart_when_stopped, 100)
 end
 
----@param state table
-function M.doctor(state)
-  local cfg = config.merge(state.config)
-  local root_dir, fallback = root.resolve_root_info(vim.api.nvim_buf_get_name(0), cfg)
-  local cmdline, cmd_env_or_err = cmd.build_cmd(cfg, root_dir)
-  local lines = {
-    "JLS Doctor",
-    "root: " .. root_dir,
-    fallback and "root-warning: markers not found, using cwd" or "root-warning: none",
-    "jls_dir: " .. tostring(cfg.jls_dir),
-    "settings: " .. vim.inspect(cfg.settings),
-  }
-  if cmdline then
-    table.insert(lines, "cmd: " .. table.concat(cmdline, " "))
-    table.insert(lines, "cmd_env: " .. vim.inspect(cmd_env_or_err or {}))
-  else
-    table.insert(lines, "cmd: <error> " .. (cmd_env_or_err or "unknown"))
+function M.open_log()
+  local log_path = get_lsp_log_path()
+  if not log_path or log_path == "" then
+    util.notify("JLS: Neovim LSP log path is unavailable", vim.log.levels.ERROR)
+    return
   end
-  util.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
+  if vim.fn.filereadable(log_path) == 0 then
+    util.notify("JLS: LSP log not found: " .. log_path, vim.log.levels.ERROR)
+    return
+  end
+
+  vim.cmd("botright split " .. vim.fn.fnameescape(log_path))
+  local buf = vim.api.nvim_get_current_buf()
+  vim.bo[buf].readonly = true
+  vim.bo[buf].modifiable = false
 end
 
 return M
