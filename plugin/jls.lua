@@ -15,3 +15,7 @@ end, {})
 vim.api.nvim_create_user_command("JlsLog", function()
   jls.log()
 end, {})
+
+vim.api.nvim_create_user_command("JlsClearCache", function()
+  jls.clear_cache()
+end, {})

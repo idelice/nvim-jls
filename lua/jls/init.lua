@@ -1,6 +1,7 @@
 local config = require("jls.config")
 local util = require("jls.util")
 local client_mod = require("jls.client")
+local cache = require("jls.cache")
 local lsp = require("jls.lsp")
 
 ---@class JlsModule
@@ -35,6 +36,15 @@ end
 
 function M.log()
   lsp.open_log()
+end
+
+function M.clear_cache()
+  local path, err = cache.clear(state.config)
+  if err then
+    util.notify(err, vim.log.levels.ERROR)
+    return
+  end
+  util.notify("Cleared JLS cache: " .. path)
 end
 
 ---@param args JlsConfig|nil

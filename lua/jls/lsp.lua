@@ -138,10 +138,25 @@ local function build_settings(cfg)
 end
 
 ---@param bufnr integer
+---@return boolean
+local function is_decompiled_buffer(bufnr)
+  local name = vim.api.nvim_buf_get_name(bufnr)
+  return name:find("jls-binary-decompiled", 1, true) ~= nil
+    or name:find("jls-jar-sources", 1, true) ~= nil
+end
+
+---@param bufnr integer
 ---@param client table|nil
 ---@param cfg JlsConfig
 local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
+    return
+  end
+
+  -- Decompiled / external-jar buffers: make readonly and skip all editing features.
+  if is_decompiled_buffer(bufnr) then
+    vim.bo[bufnr].readonly = true
+    vim.bo[bufnr].modifiable = false
     return
   end
 
@@ -217,7 +232,17 @@ local function on_attach(bufnr, client, cfg)
     end
 
     local hint_pending = false
-    request_hints = function()
+    local last_hint_file = nil
+    local last_hint_tick = nil
+    request_hints = function(opts)
+      -- On BufEnter, skip re-requesting if the file and content haven't changed.
+      if opts and opts.skip_if_unchanged then
+        local current_file = vim.api.nvim_buf_get_name(bufnr)
+        local current_tick = vim.b[bufnr].changedtick
+        if current_file == last_hint_file and current_tick == last_hint_tick then
+          return
+        end
+      end
       if hint_pending or not vim.api.nvim_buf_is_valid(bufnr) then return end
       hint_pending = true
       local line_count = vim.api.nvim_buf_line_count(bufnr)
@@ -234,6 +259,8 @@ local function on_attach(bufnr, client, cfg)
           hint_pending = false
           if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then return end
           apply_hints(result)
+          last_hint_file = vim.api.nvim_buf_get_name(bufnr)
+          last_hint_tick = vim.b[bufnr].changedtick
         end,
         bufnr
       )
@@ -282,7 +309,7 @@ local function on_attach(bufnr, client, cfg)
             local win = vim.api.nvim_get_current_win()
             if vim.api.nvim_win_get_config(win).relative ~= "" then return end
             if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then
-              request_hints()
+              request_hints({ skip_if_unchanged = true })
             end
           end,
         })

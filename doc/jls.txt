@@ -39,6 +39,7 @@ COMMANDS~
 :JlsRestart     Restart JLS.
 :JlsStop        Stop all running JLS clients.
 :JlsLog         Open Neovim's LSP log in a read-only buffer.
+:JlsClearCache  Delete this workspace's JLS disk cache.
 :checkhealth jls
                 Run the built-in health check for nvim-jls.
 
