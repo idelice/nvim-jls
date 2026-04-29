@@ -8,6 +8,11 @@ function M.resolve_launcher(cfg)
     return nil, "jls_dir is not set"
   end
 
+  jls_dir = vim.fn.expand(jls_dir)
+  if not jls_dir or jls_dir == "" then
+    return nil, "jls_dir is not set"
+  end
+
   local os_id = util.detect_os()
   local launcher = os_id == "windows"
       and util.joinpath(jls_dir, "dist", "lang_server_windows.cmd")
