@@ -11,7 +11,7 @@ JLS can run as a raw LSP server, but configuring it correctly is the hard part. 
 
 ## Requirements
 
-- Neovim 0.9+ (0.10+ recommended)
+- **Neovim 0.10+** – required for pull diagnostics (errors/warnings will not appear on older versions)
 - JLS installed locally (build or release), with a `dist/` folder
 - Optional: `nvim-lspconfig` (plugin works without it)
 
