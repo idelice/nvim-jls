@@ -9,6 +9,12 @@ local warned_roots = {}
 local shown_server_messages = {}
 local recent_server_messages = {}
 
+-- Auto-restart backoff state, keyed by root_dir
+local auto_restart_attempts = {}
+local AUTO_RESTART_MAX = 3
+local AUTO_RESTART_DELAYS = { 1000, 3000, 10000 } -- ms
+local AUTO_RESTART_RESET_UPTIME = 60              -- seconds: reset counter if server ran this long
+
 local MAX_RECORDED_SERVER_MESSAGES = 20
 
 local function find_client_for_root(root_dir)
@@ -196,6 +202,7 @@ local function on_attach(bufnr, client, cfg)
             message = d.message,
             source = d.source,
             code = d.code,
+            user_data = { lsp = d },
           })
         end
         vim.diagnostic.set(ns, bufnr, nvim_diags)
@@ -355,8 +362,7 @@ function M.make_lsp_config(state, opts)
     return nil, cmd_env
   end
 
-  state._last_resolved_cfg = cfg
-  return {
+  local lsp_cfg = {
     name = "jls",
     cmd = cmdline,
     cmd_env = cmd_env,
@@ -371,6 +377,45 @@ function M.make_lsp_config(state, opts)
     end,
     settings = build_settings(cfg),
   }
+
+  if cfg.auto_restart then
+    local start_time = vim.uv.now()
+    lsp_cfg.on_exit = function(code, signal)
+      -- clean exit → don't restart
+      if code == 0 and signal == 0 then
+        auto_restart_attempts[root_dir] = nil
+        return
+      end
+      local uptime = (vim.uv.now() - start_time) / 1000
+      local attempts = auto_restart_attempts[root_dir] or 0
+      if uptime > AUTO_RESTART_RESET_UPTIME then
+        attempts = 0
+      end
+      if attempts >= AUTO_RESTART_MAX then
+        util.notify(
+          ("JLS: crashed (code=%d); giving up after %d restart attempts"):format(code, AUTO_RESTART_MAX),
+          vim.log.levels.ERROR
+        )
+        auto_restart_attempts[root_dir] = nil
+        return
+      end
+      local delay = AUTO_RESTART_DELAYS[attempts + 1] or AUTO_RESTART_DELAYS[#AUTO_RESTART_DELAYS]
+      attempts = attempts + 1
+      auto_restart_attempts[root_dir] = attempts
+      util.notify(
+        ("JLS: crashed (code=%d); restarting in %.1fs (attempt %d/%d)"):format(
+          code, delay / 1000, attempts, AUTO_RESTART_MAX
+        ),
+        vim.log.levels.WARN
+      )
+      vim.defer_fn(function()
+        M.start(state, opts)
+      end, delay)
+    end
+  end
+
+  state._last_resolved_cfg = cfg
+  return lsp_cfg
 end
 
 ---@param state table

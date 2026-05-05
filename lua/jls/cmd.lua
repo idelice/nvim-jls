@@ -19,7 +19,7 @@ function M.resolve_launcher(cfg)
       or util.joinpath(jls_dir, "dist", "lang_server_" .. os_id .. ".sh")
 
   if vim.fn.filereadable(launcher) == 0 then
-    return nil, "JLS launcher not found: " .. launcher
+    return nil, "JLS launcher not found: " .. launcher .. "\nRun :JlsInstall to download and install JLS."
   end
 
   return launcher, nil
@@ -41,7 +41,7 @@ function M.build_cmd(cfg, _root_dir)
     return nil, err
   end
 
-  return { launcher }, nil, nil
+  return { launcher }, cfg.cmd_env or {}, nil
 end
 
 return M
