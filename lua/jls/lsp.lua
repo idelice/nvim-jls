@@ -196,6 +196,7 @@ local function on_attach(bufnr, client, cfg)
             message = d.message,
             source = d.source,
             code = d.code,
+            user_data = { lsp = d },
           })
         end
         vim.diagnostic.set(ns, bufnr, nvim_diags)
