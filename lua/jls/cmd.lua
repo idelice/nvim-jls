@@ -41,7 +41,12 @@ function M.build_cmd(cfg, _root_dir)
     return nil, err
   end
 
-  return { launcher }, nil, nil
+  local env = nil
+  if cfg.jvm_args and #cfg.jvm_args > 0 then
+    env = { JLS_JVM_OPTS = table.concat(cfg.jvm_args, " ") }
+  end
+
+  return { launcher }, env, nil
 end
 
 return M

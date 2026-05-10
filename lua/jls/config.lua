@@ -3,6 +3,7 @@
 ---@field root_markers string[]
 ---@field settings table
 ---@field inlay_hints { enabled: boolean }
+---@field jvm_args string[]|nil Extra JVM args passed via JLS_JVM_OPTS (override default -Xmx2g -Xms512m)
 
 local M = {}
 
@@ -25,6 +26,7 @@ function M.default()
     inlay_hints = {
       enabled = false,
     },
+    jvm_args = nil,
   }
 end
 

@@ -61,16 +61,23 @@ require("jls").setup({
   inlay_hints = {
     enabled = false,             -- show parameter name hints at call sites
   },
+  jvm_args = nil,                -- override JVM args (default: -Xmx2g -Xms512m ...)
 })
 ```
 
-`nvim-jls` does not choose the server JVM. It launches the packaged JLS
-launcher and passes through any LSP settings you configure. The current JLS
-distribution is built for Java 25 and runs on its packaged Java 25 runtime.
+JLS ships with sensible JVM defaults (`-Xmx2g -Xms512m -XX:MaxHeapFreeRatio=50
+-XX:MinHeapFreeRatio=20 -XX:+UseStringDeduplication`). Override via `jvm_args`:
 
-`settings.java.configuration.runtimes` may still be sent to JLS as part of the
-LSP configuration payload, but `nvim-jls` does not use that list to decide how
-the server process is started.
+```lua
+require("jls").setup({
+  jls_dir = "/path/to/jls",
+  jvm_args = { "-Xmx1g", "-Xms256m" },
+})
+```
+
+The list is joined with spaces and passed as `JLS_JVM_OPTS` to the launcher,
+which uses it in place of the default flags. You can also set the `JLS_JVM_OPTS`
+environment variable directly (outside Neovim or via `vim.fn.setenv`).
 
 ## Inlay hints
 

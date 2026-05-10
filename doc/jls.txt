@@ -65,16 +65,21 @@ CONFIGURATION~
     inlay_hints = {
       enabled = false,
     },
+    jvm_args = nil,
   })
 <
 
-nvim-jls does not choose the server JVM. It launches the packaged JLS launcher
-and passes through any LSP settings you configure. The current JLS distribution
-is built for Java 25 and runs on its packaged Java 25 runtime.
+JVM memory defaults: -Xmx2g -Xms512m -XX:MaxHeapFreeRatio=50
+-XX:MinHeapFreeRatio=20 -XX:+UseStringDeduplication. Override via jvm_args:
 
-`settings.java.configuration.runtimes` may still be sent to JLS in the LSP
-configuration payload, but nvim-jls does not use that list to decide how the
-server process is started.
+>
+  require("jls").setup({
+    jvm_args = { "-Xmx1g", "-Xms256m" },
+  })
+<
+
+The list is joined and passed as JLS_JVM_OPTS to the launcher. You can also set
+the env var directly: export JLS_JVM_OPTS="-Xmx1g".
 
 INLAY HINTS~
 
