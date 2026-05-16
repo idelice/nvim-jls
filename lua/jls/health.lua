@@ -1,5 +1,6 @@
 local cmd = require("jls.cmd")
 local config = require("jls.config")
+local installer = require("jls.installer")
 local lsp = require("jls.lsp")
 local root = require("jls.root")
 
@@ -109,11 +110,29 @@ end
 local function check_config(cfg, ctx)
   start("Configuration")
 
+  local managed_dir = installer.managed_install_dir()
+  local installed_ver = installer.installed_version()
+  local using_managed = cfg.jls_dir == managed_dir or cfg.jls_dir == vim.fn.expand(managed_dir)
+
+  if installed_ver then
+    ok("managed install: " .. managed_dir .. " (version " .. installed_ver .. ")")
+  elseif using_managed then
+    warn("JLS is not installed", {
+      "Run :JlsInstall to download and install the latest release.",
+    })
+  else
+    info("managed install not in use (jls_dir is user-configured)")
+  end
+
   if cfg.jls_dir and cfg.jls_dir ~= "" then
-    ok("jls_dir is set: " .. cfg.jls_dir)
+    if using_managed then
+      ok("jls_dir: " .. cfg.jls_dir .. " (managed)")
+    else
+      ok("jls_dir: " .. cfg.jls_dir .. " (user-configured)")
+    end
   else
     err("jls_dir is not set", {
-      'Configure `require("jls").setup({ jls_dir = "/path/to/jls" })`.',
+      'Run :JlsInstall, or configure `require("jls").setup({ jls_dir = "/path/to/jls" })`.',
     })
   end
 
