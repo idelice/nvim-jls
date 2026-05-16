@@ -107,17 +107,6 @@ require("jls").setup({
 })
 ```
 
-## Debug logging
-
-Run `:JlsDebugEnable` to switch JLS to FINE-level logging. The plugin patches
-`logging.properties` (backing up the original to `logging.properties.bak`) and
-restarts JLS automatically if it is running. Detailed logs appear in
-`:JlsLog` (Neovim's LSP log).
-
-Run `:JlsDebugDisable` to restore default log levels. If a backup exists it is
-used; otherwise the plugin reverts the patched lines. JLS restarts automatically.
-
-Debug logging persists across Neovim restarts until you explicitly disable it.
 
 ## Inlay hints
 

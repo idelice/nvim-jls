@@ -117,6 +117,7 @@ attempts with exponential backoff. Disabled by default.
   })
 <
 
+
 INLAY HINTS~
 
 *jls-inlay-hints*
