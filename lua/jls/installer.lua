@@ -173,7 +173,7 @@ function M._extract(artifact_path, is_tar, tmp_dir, tag, cleanup, callback)
 
       -- Fix permissions before moving into place
       if util.detect_os() ~= "windows" then
-        vim.fn.system("chmod +x " .. vim.fn.shellescape(staging) .. "/dist/*.sh 2>/dev/null; true")
+        vim.fn.system("chmod +x " .. vim.fn.shellescape(staging) .. "/*.sh 2>/dev/null; true")
         local os_id = util.detect_os()
         local bin_dir = util.joinpath(staging, "dist", os_id, "bin")
         vim.fn.system("chmod -R +x " .. vim.fn.shellescape(bin_dir) .. " 2>/dev/null; true")

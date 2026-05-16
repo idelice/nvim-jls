@@ -14,30 +14,47 @@ REQUIREMENTS~
 *jls-requirements*
 
 - Neovim 0.9+ (0.10+ recommended)
-- JLS installed locally with a dist/ folder
 - Optional: nvim-lspconfig
 
 SETUP~
 
 *jls-setup*
 
+Run :JlsInstall once after installing the plugin. JLS is downloaded to
+Neovim's data directory. Use setup() only to override defaults.
+
 >
-  require("jls").setup({
-    jls_dir = "/path/to/jls",
-    settings = {},
-  })
+  require("jls").setup({})
 <
 
-JLS starts automatically on FileType=java via a filetype plugin. Use setup()
-only if you want to override defaults.
+JLS starts automatically on FileType=java via a filetype plugin.
+
+DISK USAGE~
+
+*jls-disk-usage*
+
+This plugin writes to two locations:
+
+JLS binary:
+  stdpath("data")/jls/
+  Typically ~/.local/share/nvim/jls/ on Linux/macOS,
+  ~/AppData/Local/nvim-data/jls/ on Windows.
+  Remove by deleting the directory manually.
+
+Workspace cache:
+  $XDG_CACHE_HOME/jls/<project>-<hash>/
+  Typically ~/.cache/jls/ on Linux/macOS.
+  Remove per-workspace with :JlsClearCache, or delete ~/.cache/jls/ manually.
 
 COMMANDS~
 
 *jls-commands*
 
-:JlsStart       Start JLS for the current buffer.
-:JlsRestart     Restart JLS.
-:JlsStop        Stop all running JLS clients.
+:JlsInstall [tag]
+                Download and install JLS. Uses latest release by default.
+                Pass a version tag (e.g. v1.2.3) to install a specific version.
+:JlsUpdate      Update JLS to the latest release.
+:JlsRestart     Restart JLS. Only available while JLS is running.
 :JlsLog         Open Neovim's LSP log in a read-only buffer.
 :JlsClearCache  Delete this workspace's JLS disk cache.
 :checkhealth jls
@@ -65,16 +82,40 @@ CONFIGURATION~
     inlay_hints = {
       enabled = false,
     },
+    jvm_args = nil,
+    cmd_env = {},
+    auto_restart = false,
   })
 <
 
-nvim-jls does not choose the server JVM. It launches the packaged JLS launcher
-and passes through any LSP settings you configure. The current JLS distribution
-is built for Java 25 and runs on its packaged Java 25 runtime.
+JVM memory defaults: -Xmx2g -Xms512m -XX:MaxHeapFreeRatio=50
+-XX:MinHeapFreeRatio=20 -XX:+UseStringDeduplication. Override via jvm_args:
 
-`settings.java.configuration.runtimes` may still be sent to JLS in the LSP
-configuration payload, but nvim-jls does not use that list to decide how the
-server process is started.
+>
+  require("jls").setup({
+    jvm_args = { "-Xmx1g", "-Xms256m" },
+  })
+<
+
+The list is joined and passed as JLS_JVM_OPTS to the launcher. You can also set
+the env var directly: export JLS_JVM_OPTS="-Xmx1g".
+
+cmd_env passes arbitrary environment variables to the JLS process:
+
+>
+  require("jls").setup({
+    cmd_env = { JAVA_HOME = "/usr/local/java21" },
+  })
+<
+
+auto_restart automatically restarts JLS if it exits unexpectedly, up to 3
+attempts with exponential backoff. Disabled by default.
+
+>
+  require("jls").setup({
+    auto_restart = true,
+  })
+<
 
 INLAY HINTS~
 
@@ -90,8 +131,3 @@ Enable parameter name hints at call sites:
 
 Hints appear only for files in your workspace. JDK and dependency sources
 opened via go-to-definition are not annotated.
-
-To customise the appearance, override the highlight group in your colorscheme:
->
-  vim.api.nvim_set_hl(0, "LspInlayHint", { fg = "#888888", italic = true })
-<

@@ -23,7 +23,35 @@ end
 
 ---@param opts JlsConfig|nil
 function M.start(opts)
-  lsp.start(state, opts, { notify = true })
+  local _, err = lsp.start(state, opts, { notify = true })
+  if err then
+    local cfg = config.merge(state.config, opts or {})
+    local is_managed = vim.fn.expand(cfg.jls_dir or "") == installer.managed_install_dir()
+    if is_managed and not installer.installed_version() then
+      M._auto_install_and_start(opts)
+    elseif is_managed then
+      util.notify(err, vim.log.levels.ERROR)
+    else
+      util.notify(err .. "\nTip: run :JlsInstall to use the managed installation instead.", vim.log.levels.WARN)
+    end
+  end
+end
+
+function M._auto_install_and_start(opts)
+  installer.latest_tag(function(fetch_err, tag)
+    if fetch_err or not tag then
+      util.notify("JLS: could not fetch latest release — " .. (fetch_err or "unknown"), vim.log.levels.ERROR)
+      return
+    end
+    util.notify("JLS: not installed — installing " .. tag .. " ...", vim.log.levels.INFO)
+    installer.install(tag, function(install_err)
+      if install_err then
+        util.notify("JLS: install failed — " .. install_err, vim.log.levels.ERROR)
+        return
+      end
+      M.start(opts)
+    end)
+  end)
 end
 
 function M.stop()
@@ -62,6 +90,10 @@ function M.install(version)
     installer.install(version, function(install_err)
       if install_err then
         util.notify("JLS: install failed — " .. install_err, vim.log.levels.ERROR)
+        return
+      end
+      if vim.bo.filetype == "java" then
+        M.start()
       end
     end)
     return
@@ -79,6 +111,10 @@ function M.install(version)
     installer.install(tag, function(install_err)
       if install_err then
         util.notify("JLS: install failed — " .. install_err, vim.log.levels.ERROR)
+        return
+      end
+      if vim.bo.filetype == "java" then
+        M.start()
       end
     end)
   end)
@@ -103,6 +139,10 @@ function M.update()
     installer.install(tag, function(install_err)
       if install_err then
         util.notify("JLS: update failed — " .. install_err, vim.log.levels.ERROR)
+        return
+      end
+      if vim.bo.filetype == "java" then
+        M.start()
       end
     end)
   end)

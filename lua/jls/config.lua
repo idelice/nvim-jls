@@ -5,6 +5,7 @@
 ---@field inlay_hints { enabled: boolean }
 ---@field cmd_env table<string,string> Extra environment variables passed to the JLS process
 ---@field auto_restart boolean Automatically restart JLS if it crashes (up to 3 attempts with backoff)
+---@field jvm_args string[]|nil Extra JVM args passed via JLS_JVM_OPTS (override default -Xmx2g -Xms512m)
 
 local installer = require("jls.installer")
 
@@ -31,6 +32,7 @@ function M.default()
     },
     cmd_env = {},
     auto_restart = false,
+    jvm_args = nil,
   }
 end
 

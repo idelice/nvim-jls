@@ -424,8 +424,7 @@ end
 function M.start(state, opts, control)
   local lsp_config, err = M.make_lsp_config(state, opts)
   if not lsp_config then
-    util.notify(err or "JLS configuration failed", vim.log.levels.ERROR)
-    return
+    return nil, err
   end
 
   local bufnr = vim.api.nvim_get_current_buf()
