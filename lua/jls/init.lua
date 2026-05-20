@@ -16,6 +16,16 @@ local state = {
 ---@type JlsConfig
 M.config = state.config
 
+--- Accept user configuration opts (called automatically by lazy.nvim with `opts = {...}`).
+--- Store them so ftplugin/java.lua's `jls.start()` picks them up.
+---@param opts JlsConfig|nil
+function M.setup(opts)
+  if opts then
+    state.config = config.merge(state.config, opts)
+    M.config = state.config
+  end
+end
+
 ---@param opts JlsConfig|nil
 function M.make_lsp_config(opts)
   return lsp.make_lsp_config(state, opts)

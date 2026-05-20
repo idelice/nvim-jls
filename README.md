@@ -119,3 +119,38 @@ require("jls").setup({
 ```
 
 Hints appear only for files in your workspace. JDK and dependency sources opened via go-to-definition are not annotated.
+
+## Code actions
+
+Use the standard Neovim LSP mapping (`vim.lsp.buf.code_action()`) to trigger code actions.
+
+Actions are computed lazily — the list appears immediately, and the workspace edit is only computed when you confirm an action.
+
+**On a text selection inside a method:**
+- Surround with try-catch
+- Extract to local variable
+
+**With cursor inside a class (no selection):**
+- Generate constructor / equals / hashCode / toString
+- Generate getters (pick fields) — opens a picker
+- Generate setters (pick fields) — opens a picker; `final` fields are excluded
+- Override inherited method — one entry per overridable method
+- Add `@Lombok` annotation — available when Lombok is on the classpath
+
+**Quick fixes (from diagnostics):**
+- Import unresolved type
+- Add `throws` for unreported exception
+- Implement abstract methods
+- Generate constructor (missing field initializer)
+- Create missing method
+- Remove unused class / method / field / local variable
+- Remove unused `throws` clause
+- Suppress unchecked warning
+
+### Getter/setter picker
+
+When snacks.nvim is loaded, a multi-select picker opens (`<Tab>` to select, `<CR>` to confirm). Without snacks.nvim, a floating window lists fields and `vim.ui.input` prompts for a comma-separated list of numbers (e.g. `1,3`) or `all`.
+
+## Rename
+
+Use the standard Neovim rename (`vim.lsp.buf.rename()`). When renaming a class, JLS also renames the source file on disk and notifies your file explorer (nvim-tree, neo-tree, mini.files, and snacks.nvim explorer are all supported) to refresh automatically.

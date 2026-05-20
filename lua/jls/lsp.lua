@@ -5,6 +5,144 @@ local util = require("jls.util")
 
 local M = {}
 
+-- Pending params from a `java/renameFile` notification, consumed by the
+-- `textDocument/rename` response handler to ensure the disk rename happens
+-- AFTER the WorkspaceEdit is applied to all buffers.
+-- Keyed by client_id to avoid cross-client interference in multi-root workspaces.
+local _pending_java_rename = {}
+
+-- Run the picker and generate accessor methods.
+-- Works for both the workspace/executeCommand response path (nvim ≤0.10)
+-- and the exec_cmd patch path (nvim ≥0.11).
+-- `client`  – the JLS client object
+-- `className`, `methodKind` – from the pickFields payload
+-- `fieldStr` – comma-separated list of field names
+local function pick_and_generate(client, className, methodKind, fieldStr)
+  local fields = {}
+  for f in tostring(fieldStr):gmatch("[^,]+") do
+    table.insert(fields, vim.trim(f))
+  end
+  if #fields == 0 then
+    return
+  end
+
+  local function generate(selected_fields)
+    if not selected_fields or #selected_fields == 0 then
+      return
+    end
+    local buf = vim.api.nvim_get_current_buf()
+    vim.lsp.buf_request(buf, "workspace/executeCommand", {
+      command = "java.generateFields",
+      arguments = { className, methodKind, table.concat(selected_fields, ",") },
+    }, function(gen_err, gen_result)
+      if gen_err then
+        vim.notify("[jls] generateFields failed: " .. tostring(gen_err.message or gen_err), vim.log.levels.ERROR)
+        return
+      end
+      if gen_result then
+        vim.lsp.util.apply_workspace_edit(gen_result, client and client.offset_encoding or "utf-8")
+      end
+    end)
+  end
+
+  -- Prefer snacks multi-select picker, fall back to numbered echo + vim.ui.input.
+  -- snacks.picker.select always calls on_choice with a single item; use pick()
+  -- directly so we can read picker:selected({fallback=true}) on confirm.
+  local snacks = package.loaded["snacks"]
+  if snacks and snacks.picker and type(snacks.picker.pick) == "function" then
+    local done = false
+    snacks.picker.pick({
+      source = "select",
+      title = ("Generate %s  <Tab> select  <CR> done"):format(methodKind),
+      finder = function()
+        local ret = {}
+        for i, field in ipairs(fields) do
+          ret[i] = { text = field, item = field, idx = i }
+        end
+        return ret
+      end,
+      format = function(item)
+        return { { item.text, "Normal" } }
+      end,
+      actions = {
+        confirm = function(picker, _item)
+          if done then
+            return
+          end
+          done = true
+          local sel = picker:selected({ fallback = true })
+          picker:close()
+          vim.schedule(function()
+            local result_fields = {}
+            for _, s in ipairs(sel) do
+              table.insert(result_fields, s.item)
+            end
+            generate(result_fields)
+          end)
+        end,
+      },
+    })
+  else
+    -- Build float lines
+    local float_lines = { ("  Generate %s"):format(methodKind), "" }
+    for i, f in ipairs(fields) do
+      table.insert(float_lines, string.format("  %d.  %s", i, f))
+    end
+    table.insert(float_lines, "")
+    table.insert(float_lines, "  Type numbers (e.g. 1,3) or 'all'")
+
+    local float_w = 0
+    for _, l in ipairs(float_lines) do
+      float_w = math.max(float_w, #l)
+    end
+    float_w = float_w + 2
+
+    local float_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, float_lines)
+
+    local float_win = vim.api.nvim_open_win(float_buf, false, {
+      relative = "editor",
+      row = math.floor((vim.o.lines - #float_lines) / 2),
+      col = math.floor((vim.o.columns - float_w) / 2),
+      width = float_w,
+      height = #float_lines,
+      style = "minimal",
+      border = "rounded",
+      noautocmd = true,
+    })
+
+    local function close_float()
+      if vim.api.nvim_win_is_valid(float_win) then
+        vim.api.nvim_win_close(float_win, true)
+      end
+      if vim.api.nvim_buf_is_valid(float_buf) then
+        vim.api.nvim_buf_delete(float_buf, { force = true })
+      end
+    end
+
+    vim.ui.input({ prompt = "Fields (e.g. 1,3 or all): " }, function(input)
+      close_float()
+      if not input or vim.trim(input) == "" then
+        return
+      end
+      local selected = {}
+      if vim.trim(input) == "all" then
+        for _, f in ipairs(fields) do
+          table.insert(selected, f)
+        end
+      else
+        for token in input:gmatch("[^,]+") do
+          local idx = tonumber(vim.trim(token))
+          if idx and fields[idx] then
+            table.insert(selected, fields[idx])
+          end
+        end
+      end
+      generate(selected)
+    end)
+  end
+end
+
 local warned_roots = {}
 local shown_server_messages = {}
 local recent_server_messages = {}
@@ -13,7 +151,7 @@ local recent_server_messages = {}
 local auto_restart_attempts = {}
 local AUTO_RESTART_MAX = 3
 local AUTO_RESTART_DELAYS = { 1000, 3000, 10000 } -- ms
-local AUTO_RESTART_RESET_UPTIME = 60              -- seconds: reset counter if server ran this long
+local AUTO_RESTART_RESET_UPTIME = 60 -- seconds: reset counter if server ran this long
 
 local MAX_RECORDED_SERVER_MESSAGES = 20
 
@@ -71,10 +209,12 @@ local function recent_stderr_warnings(log_path, launcher)
   local warnings = {}
   for i = #lines, 1, -1 do
     local line = lines[i]
-    if line:find('"rpc"', 1, true)
-        and line:find(launcher, 1, true)
-        and line:find('"stderr"', 1, true)
-        and line:find("WARNING", 1, true) then
+    if
+      line:find('"rpc"', 1, true)
+      and line:find(launcher, 1, true)
+      and line:find('"stderr"', 1, true)
+      and line:find("WARNING", 1, true)
+    then
       local payload = line:match([["stderr"%s+"(.*)"]]) or line
       payload = payload:gsub([[\n]], "\n")
       payload = payload:gsub([[\t]], "\t")
@@ -147,8 +287,7 @@ end
 ---@return boolean
 local function is_decompiled_buffer(bufnr)
   local name = vim.api.nvim_buf_get_name(bufnr)
-  return name:find("jls-binary-decompiled", 1, true) ~= nil
-    or name:find("jls-jar-sources", 1, true) ~= nil
+  return name:find("jls-binary-decompiled", 1, true) ~= nil or name:find("jls-jar-sources", 1, true) ~= nil
 end
 
 ---@param bufnr integer
@@ -157,6 +296,23 @@ end
 local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
+  end
+
+  -- Patch exec_cmd to intercept java.pickAndGenerate before it is sent to the
+  -- server, so we can show the picker and issue java.generateFields ourselves.
+  -- exec_cmd provides its own callback to client:request, which would otherwise
+  -- swallow the server response without routing it through any handler.
+  if not client._jls_exec_cmd_patched and type(client.exec_cmd) == "function" then
+    client._jls_exec_cmd_patched = true
+    local orig_exec_cmd = client.exec_cmd
+    client.exec_cmd = function(self, command, opts, handler)
+      if command.command == "java.pickAndGenerate" then
+        local args = command.arguments
+        pick_and_generate(self, args and args[1], args and args[2], args and args[3])
+        return
+      end
+      return orig_exec_cmd(self, command, opts, handler)
+    end
   end
 
   -- Decompiled / external-jar buffers: make readonly and skip all editing features.
@@ -250,27 +406,26 @@ local function on_attach(bufnr, client, cfg)
           return
         end
       end
-      if hint_pending or not vim.api.nvim_buf_is_valid(bufnr) then return end
+      if hint_pending or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
       hint_pending = true
       local line_count = vim.api.nvim_buf_line_count(bufnr)
-      client:request(
-        "textDocument/inlayHint",
-        {
-          textDocument = vim.lsp.util.make_text_document_params(bufnr),
-          range = {
-            start = { line = 0, character = 0 },
-            ["end"] = { line = line_count, character = 0 },
-          },
+      client:request("textDocument/inlayHint", {
+        textDocument = vim.lsp.util.make_text_document_params(bufnr),
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = line_count, character = 0 },
         },
-        function(err, result)
-          hint_pending = false
-          if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then return end
-          apply_hints(result)
-          last_hint_file = vim.api.nvim_buf_get_name(bufnr)
-          last_hint_tick = vim.b[bufnr].changedtick
-        end,
-        bufnr
-      )
+      }, function(err, result)
+        hint_pending = false
+        if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then
+          return
+        end
+        apply_hints(result)
+        last_hint_file = vim.api.nvim_buf_get_name(bufnr)
+        last_hint_tick = vim.b[bufnr].changedtick
+      end, bufnr)
     end
   end
 
@@ -295,7 +450,9 @@ local function on_attach(bufnr, client, cfg)
       buffer = bufnr,
       callback = function()
         local win = vim.api.nvim_get_current_win()
-        if vim.api.nvim_win_get_config(win).relative ~= "" then return end
+        if vim.api.nvim_win_get_config(win).relative ~= "" then
+          return
+        end
         request_diagnostics()
       end,
     })
@@ -314,7 +471,9 @@ local function on_attach(bufnr, client, cfg)
           buffer = bufnr,
           callback = function()
             local win = vim.api.nvim_get_current_win()
-            if vim.api.nvim_win_get_config(win).relative ~= "" then return end
+            if vim.api.nvim_win_get_config(win).relative ~= "" then
+              return
+            end
             if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then
               request_hints({ skip_if_unchanged = true })
             end
@@ -368,6 +527,34 @@ function M.make_lsp_config(state, opts)
     cmd_env = cmd_env,
     handlers = {
       ["window/showMessage"] = show_message_handler(root_dir),
+      ["java/renameFile"] = function(_, result, ctx)
+        if not result or not result.oldPath or not result.newPath then
+          return
+        end
+        _pending_java_rename[ctx.client_id] = result
+      end,
+      ["textDocument/rename"] = function(err, result, ctx)
+        if err then
+          vim.notify("Rename failed: " .. tostring(err), vim.log.levels.ERROR)
+          return
+        end
+        if not result then
+          vim.notify("Language server couldn't provide rename result", vim.log.levels.INFO)
+          return
+        end
+        local client = vim.lsp.get_client_by_id(ctx.client_id)
+        if not client then
+          return
+        end
+        vim.lsp.util.apply_workspace_edit(result, client.offset_encoding)
+        local pending = _pending_java_rename[ctx.client_id]
+        _pending_java_rename[ctx.client_id] = nil
+        if pending then
+          vim.schedule(function()
+            require("jls.commands").handle_rename_file(pending)
+          end)
+        end
+      end,
     },
     on_attach = function(client, bufnr)
       on_attach(bufnr, client, cfg)
@@ -404,7 +591,10 @@ function M.make_lsp_config(state, opts)
       auto_restart_attempts[root_dir] = attempts
       util.notify(
         ("JLS: crashed (code=%d); restarting in %.1fs (attempt %d/%d)"):format(
-          code, delay / 1000, attempts, AUTO_RESTART_MAX
+          code,
+          delay / 1000,
+          attempts,
+          AUTO_RESTART_MAX
         ),
         vim.log.levels.WARN
       )
