@@ -11,10 +11,19 @@ local installer = require("jls.installer")
 
 local M = {}
 
+---@return string
+local function resolve_default_jls_dir()
+  local mason_path = vim.fn.stdpath("data") .. "/mason/packages/jls"
+  if vim.fn.isdirectory(mason_path) == 1 then
+    return mason_path
+  end
+  return installer.managed_install_dir()
+end
+
 ---@return JlsConfig
 function M.default()
   return {
-    jls_dir = installer.managed_install_dir(),
+    jls_dir = resolve_default_jls_dir(),
     root_markers = {
       "pom.xml",
       "build.gradle",
