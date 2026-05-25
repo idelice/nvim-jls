@@ -154,3 +154,61 @@ When snacks.nvim is loaded, a multi-select picker opens (`<Tab>` to select, `<CR
 ## Rename
 
 Use the standard Neovim rename (`vim.lsp.buf.rename()`). When renaming a class, JLS also renames the source file on disk and notifies your file explorer (nvim-tree, neo-tree, mini.files, and snacks.nvim explorer are all supported) to refresh automatically.
+
+## Debugging
+
+JLS ships a DAP debug adapter (`jls-debug-adapter`) alongside the language server binary. It attaches to a running JVM via JDWP — you start your app in debug mode first, then connect from Neovim.
+
+### Setup
+
+Install [nvim-dap](https://github.com/mfussenegger/nvim-dap) and configure the adapter:
+
+```lua
+local dap = require("dap")
+
+dap.adapters.jls = {
+  type = "executable",
+  command = "jls-debug-adapter",  -- must be on PATH (mason install handles this)
+}
+
+dap.configurations.java = {
+  {
+    type = "jls",
+    request = "attach",
+    name = "Debug (Attach) - Remote (JLS)",
+    hostName = "127.0.0.1",
+    port = 5005,
+    -- Required: absolute path(s) to your Java source roots.
+    -- Defaults to src/main/java relative to cwd; set SOURCE_ROOT env var to override.
+    sourceRoots = function()
+      local root = os.getenv("SOURCE_ROOT")
+      if root and root ~= "" then return { root } end
+      return { vim.fn.getcwd() .. "/src/main/java" }
+    end,
+  },
+}
+```
+
+(To-be-implemented) If you use [LazyVim](https://github.com/LazyVim/LazyVim), enable the `lazyvim.plugins.extras.lang.jls` extra — it configures the adapter automatically.
+
+### Usage
+
+**1. Start your Java application with JDWP enabled:**
+
+| Build tool | Command |
+|---|---|
+| Maven (Spring Boot) | `./mvnw spring-boot:run -Dspring-boot.run.jvmArguments="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"` |
+| Gradle (Spring Boot) | `./gradlew bootRun --debug-jvm` |
+| Plain JAR | `java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -jar app.jar` |
+
+Wait for output like `Listening for transport dt_socket at address: 5005` before attaching.
+
+**2. Open Neovim from the project root** so that `sourceRoots` resolves correctly. If your sources live outside `src/main/java`, set the env var before launching:
+
+```sh
+SOURCE_ROOT=/path/to/src/main/java nvim .
+```
+
+**3. Attach the debugger** via `:DapContinue` (or `<leader>dc` in LazyVim). Select "Debug (Attach) - Remote (JLS)" when prompted.
+
+Set breakpoints with `:DapToggleBreakpoint` (`<leader>db`) before or after attaching.
