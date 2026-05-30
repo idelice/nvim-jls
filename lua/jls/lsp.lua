@@ -361,6 +361,14 @@ local function on_attach(bufnr, client, cfg)
         end
         local nvim_diags = {}
         for _, d in ipairs(result.items or {}) do
+          local diag_tags = nil
+          if d.tags then
+            diag_tags = {}
+            for _, tag in ipairs(d.tags) do
+              if tag == 1 then diag_tags.unnecessary = true end
+              if tag == 2 then diag_tags.deprecated = true end
+            end
+          end
           table.insert(nvim_diags, {
             lnum = d.range.start.line,
             end_lnum = d.range["end"].line,
@@ -370,6 +378,7 @@ local function on_attach(bufnr, client, cfg)
             message = d.message,
             source = d.source,
             code = d.code,
+            _tags = diag_tags,
             user_data = { lsp = d },
           })
         end
