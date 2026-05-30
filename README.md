@@ -14,8 +14,6 @@ JLS can run as a raw LSP server, but configuring it correctly is the hard part. 
 - **Neovim 0.10+** – required for pull diagnostics (errors/warnings will not appear on older versions)
 - Optional: `nvim-lspconfig` (plugin works without it)
 
-JLS is not currently listed in nvim-lspconfig or mason because it does not meet their minimum GitHub star threshold yet. This plugin still works with or without nvim-lspconfig/mason; if they become available, you can use them alongside this plugin without changing your setup.
-
 ## Quick start
 
 ```lua
@@ -26,9 +24,11 @@ JLS is not currently listed in nvim-lspconfig or mason because it does not meet 
 }
 ```
 
-Run `:JlsInstall` once after installing the plugin. JLS is downloaded to Neovim's data directory automatically. `setup()` is only needed to override defaults.
+JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is only needed to override defaults.
 
-JLS starts automatically on `FileType=java` via a filetype plugin.
+**Installation:** If you use [mason.nvim](https://github.com/mason-org/mason.nvim), install via `:MasonInstall jls` — the plugin detects and uses the mason path automatically. Without mason, run `:JlsInstall` once to download JLS to Neovim's data directory.
+
+> **Note for nvim-lspconfig users:** Do not call `require('lspconfig').jls.setup()` yourself — nvim-jls calls it internally with its own configuration. Doing so causes a conflict where either your settings or nvim-jls's features are silently dropped depending on load order.
 
 ## Disk usage
 

@@ -322,6 +322,10 @@ local function on_attach(bufnr, client, cfg)
     return
   end
 
+  -- Disable documentHighlight — it fires on CursorHold and adds perceived
+  -- latency to navigation by triggering redraws and queuing requests.
+  client.server_capabilities.documentHighlightProvider = nil
+
   -- Neovim's default pull-diagnostic trigger fires on every textDocument/didChange
   -- (debounced at ~150ms), causing a full javac compile on each keystroke.
   -- Clearing diagnosticProvider before vim.schedule runs the capability setup
@@ -333,7 +337,15 @@ local function on_attach(bufnr, client, cfg)
   local group = vim.api.nvim_create_augroup(augroup, { clear = true })
   local ns = vim.lsp.diagnostic.get_namespace(client.id)
 
-  local function request_diagnostics()
+  local last_diag_tick = nil
+
+  local function request_diagnostics(opts)
+    -- Skip if content hasn't changed since last successful request (e.g. BufEnter after gd).
+    local current_tick = vim.b[bufnr].changedtick
+    if opts and opts.skip_if_unchanged and current_tick == last_diag_tick then
+      return
+    end
+    last_diag_tick = current_tick
     -- client:request flushes pending didChange first so the server always
     -- compiles the current buffer content.
     -- We supply our own handler instead of nil: passing nil would route the
@@ -369,6 +381,7 @@ local function on_attach(bufnr, client, cfg)
 
   local DEBOUNCE_MS = 500
   local timer = vim.uv.new_timer()
+  local hl_timer = vim.uv.new_timer()
 
   -- Inlay hints state: defined before client_ready so request_hints is in scope.
   local request_hints
@@ -453,7 +466,7 @@ local function on_attach(bufnr, client, cfg)
         if vim.api.nvim_win_get_config(win).relative ~= "" then
           return
         end
-        request_diagnostics()
+        request_diagnostics({ skip_if_unchanged = true })
       end,
     })
 
@@ -482,6 +495,48 @@ local function on_attach(bufnr, client, cfg)
       end
     end
 
+    -- Custom documentHighlight: debounced, cancelled on cursor move so it never
+    -- blocks navigation. Neovim's built-in version causes perceived latency.
+    -- Scoped to this client+buffer only — does not affect other LSP clients.
+    local hl_ns = vim.api.nvim_create_namespace("jls_document_highlight_" .. bufnr)
+    local HL_DEBOUNCE_MS = 300
+
+    local function clear_highlights()
+      vim.api.nvim_buf_clear_namespace(bufnr, hl_ns, 0, -1)
+    end
+
+    vim.api.nvim_create_autocmd("CursorMoved", {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        hl_timer:stop()
+        clear_highlights()
+        hl_timer:start(HL_DEBOUNCE_MS, 0, vim.schedule_wrap(function()
+          if not vim.api.nvim_buf_is_valid(bufnr) then return end
+          client:request("textDocument/documentHighlight", {
+            textDocument = vim.lsp.util.make_text_document_params(bufnr),
+            position = vim.lsp.util.make_position_params(0, client.offset_encoding).position,
+          }, function(err, result)
+            clear_highlights()
+            if err or not result then return end
+            for _, ref in ipairs(result) do
+              local start = ref.range.start
+              local finish = ref.range["end"]
+              pcall(vim.api.nvim_buf_add_highlight, bufnr, hl_ns, "LspReferenceText", start.line, start.character, finish.character)
+            end
+          end, bufnr)
+        end))
+      end,
+    })
+    vim.api.nvim_create_autocmd("InsertEnter", {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        hl_timer:stop()
+        clear_highlights()
+      end,
+    })
+
     request_diagnostics()
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     local root_dir = client.root_dir or ""
@@ -502,6 +557,10 @@ local function on_attach(bufnr, client, cfg)
         if not timer:is_closing() then
           timer:stop()
           timer:close()
+        end
+        if not hl_timer:is_closing() then
+          hl_timer:stop()
+          hl_timer:close()
         end
         pcall(vim.api.nvim_del_augroup_by_name, augroup)
       end
