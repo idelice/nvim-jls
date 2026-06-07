@@ -27,7 +27,11 @@ local function pick_and_generate(client, className, methodKind, fieldStr)
   end
 
   local function generate(selected_fields)
-    if not selected_fields or #selected_fields == 0 then
+    if not selected_fields then
+      return
+    end
+    -- For non-constructor kinds, require at least one field selected.
+    if #selected_fields == 0 and methodKind ~= "constructor" then
       return
     end
     local buf = vim.api.nvim_get_current_buf()
@@ -70,7 +74,9 @@ local function pick_and_generate(client, className, methodKind, fieldStr)
             return
           end
           done = true
-          local sel = picker:selected({ fallback = true })
+          -- Only use fallback (cursor item) for non-constructor kinds.
+          -- For constructor, no explicit selection means no-arg constructor.
+          local sel = picker:selected({ fallback = methodKind ~= "constructor" })
           picker:close()
           vim.schedule(function()
             local result_fields = {}
@@ -122,7 +128,11 @@ local function pick_and_generate(client, className, methodKind, fieldStr)
 
     vim.ui.input({ prompt = "Fields (e.g. 1,3 or all): " }, function(input)
       close_float()
-      if not input or vim.trim(input) == "" then
+      if not input then
+        return
+      end
+      if vim.trim(input) == "" then
+        generate({})
         return
       end
       local selected = {}
