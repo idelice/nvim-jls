@@ -580,6 +580,23 @@ local function on_attach(bufnr, client, cfg)
 
   client_ready()
 
+  -- Listen for the initial workspace index completion to trigger first diagnostics.
+  -- Fires only once (the first "Index ready" after attach), then removes itself.
+  local index_ready_group = vim.api.nvim_create_augroup("JlsIndexReady_" .. bufnr, { clear = true })
+  vim.api.nvim_create_autocmd("LspProgress", {
+    group = index_ready_group,
+    callback = function(ev)
+      if ev.data and ev.data.client_id == client.id then
+        local val = ev.data.params and ev.data.params.value
+        if val and val.kind == "end" and val.message == "Index ready" then
+          request_diagnostics()
+          pcall(vim.api.nvim_del_augroup_by_name, "JlsIndexReady_" .. bufnr)
+          return true
+        end
+      end
+    end,
+  })
+
   -- Clean up timer and autocmds when jls detaches from this buffer.
   vim.api.nvim_create_autocmd("LspDetach", {
     group = group,
