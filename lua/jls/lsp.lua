@@ -519,6 +519,14 @@ local function on_attach(bufnr, client, cfg)
     -- Scoped to this client+buffer only — does not affect other LSP clients.
     local hl_ns = vim.api.nvim_create_namespace("jls_document_highlight_" .. bufnr)
     local HL_DEBOUNCE_MS = 300
+    local hl_request_id = nil
+
+    local function cancel_highlight()
+      if hl_request_id then
+        client.cancel_request(hl_request_id)
+        hl_request_id = nil
+      end
+    end
 
     local function clear_highlights()
       vim.api.nvim_buf_clear_namespace(bufnr, hl_ns, 0, -1)
@@ -529,13 +537,15 @@ local function on_attach(bufnr, client, cfg)
       buffer = bufnr,
       callback = function()
         hl_timer:stop()
+        cancel_highlight()
         clear_highlights()
         hl_timer:start(HL_DEBOUNCE_MS, 0, vim.schedule_wrap(function()
           if not vim.api.nvim_buf_is_valid(bufnr) then return end
-          client:request("textDocument/documentHighlight", {
+          local success, req_id = client:request("textDocument/documentHighlight", {
             textDocument = vim.lsp.util.make_text_document_params(bufnr),
             position = vim.lsp.util.make_position_params(0, client.offset_encoding).position,
           }, function(err, result)
+            hl_request_id = nil
             clear_highlights()
             if err or not result then return end
             for _, ref in ipairs(result) do
@@ -544,6 +554,9 @@ local function on_attach(bufnr, client, cfg)
               pcall(vim.api.nvim_buf_add_highlight, bufnr, hl_ns, "LspReferenceText", start.line, start.character, finish.character)
             end
           end, bufnr)
+          if success then
+            hl_request_id = req_id
+          end
         end))
       end,
     })
@@ -552,6 +565,7 @@ local function on_attach(bufnr, client, cfg)
       buffer = bufnr,
       callback = function()
         hl_timer:stop()
+        cancel_highlight()
         clear_highlights()
       end,
     })
