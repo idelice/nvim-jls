@@ -45,3 +45,18 @@ end, { nargs = "?", desc = "Download and install JLS (optionally specify a versi
 vim.api.nvim_create_user_command("JlsUpdate", function()
   jls.update()
 end, { desc = "Update JLS to the latest release" })
+
+-- Ensure JLS server processes are killed when Neovim exits.
+-- Neovim's built-in shutdown may not wait for the LSP handshake to complete,
+-- leaving orphaned java processes consuming GBs of memory.
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  group = vim.api.nvim_create_augroup("JlsCleanup", { clear = true }),
+  callback = function()
+    for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
+      -- Force stop sends SIGTERM to the spawned process
+      pcall(function() client:stop(true) end)
+    end
+    -- Give the process a moment to die
+    vim.wait(100, function() return false end)
+  end,
+})

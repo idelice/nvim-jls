@@ -167,8 +167,31 @@ local MAX_RECORDED_SERVER_MESSAGES = 20
 
 local function find_client_for_root(root_dir)
   for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
-    if client.config and client.config.root_dir == root_dir then
-      return client
+    if client.config and client.config.root_dir then
+      local client_root = client.config.root_dir
+      -- Exact match
+      if client_root == root_dir then
+        return client
+      end
+      -- Same multi-module project: both roots share a common ancestor with settings.gradle.
+      -- e.g. elasticsearch/server and elasticsearch/plugins/analysis-icu are siblings
+      -- under elasticsearch/ (which has settings.gradle). Reuse the same client.
+      local function find_settings_root(path)
+        local dir = path
+        while dir and dir ~= "/" do
+          if vim.fn.filereadable(dir .. "/settings.gradle") == 1
+              or vim.fn.filereadable(dir .. "/settings.gradle.kts") == 1 then
+            return dir
+          end
+          dir = vim.fn.fnamemodify(dir, ":h")
+        end
+        return nil
+      end
+      local client_settings_root = find_settings_root(client_root)
+      local new_settings_root = find_settings_root(root_dir)
+      if client_settings_root and client_settings_root == new_settings_root then
+        return client
+      end
     end
   end
   return nil
@@ -332,10 +355,6 @@ local function on_attach(bufnr, client, cfg)
     return
   end
 
-  -- Disable documentHighlight — it fires on CursorHold and adds perceived
-  -- latency to navigation by triggering redraws and queuing requests.
-  client.server_capabilities.documentHighlightProvider = nil
-
   -- Neovim's default pull-diagnostic trigger fires on every textDocument/didChange
   -- (debounced at ~150ms), causing a full javac compile on each keystroke.
   -- Clearing diagnosticProvider before vim.schedule runs the capability setup
@@ -348,6 +367,7 @@ local function on_attach(bufnr, client, cfg)
   local ns = vim.lsp.diagnostic.get_namespace(client.id)
 
   local last_diag_tick = nil
+  local refresh_pending = false
 
   local function request_diagnostics(opts)
     -- Skip if content hasn't changed since last successful request (e.g. BufEnter after gd).
@@ -356,12 +376,7 @@ local function on_attach(bufnr, client, cfg)
       return
     end
     last_diag_tick = current_tick
-    -- client:request flushes pending didChange first so the server always
-    -- compiles the current buffer content.
-    -- We supply our own handler instead of nil: passing nil would route the
-    -- response through Neovim's default textDocument/diagnostic handler, which
-    -- expects internal bufstate that was never initialised (because we cleared
-    -- diagnosticProvider above) and crashes with "attempt to index bufstate".
+    local from_refresh = opts and opts.from_refresh
     client:request(
       "textDocument/diagnostic",
       { textDocument = vim.lsp.util.make_text_document_params(bufnr) },
@@ -369,8 +384,14 @@ local function on_attach(bufnr, client, cfg)
         if err or not result or result.kind ~= "full" then
           return
         end
+        local items = result.items or {}
+        -- Empty response from a non-refresh request means compile is still pending.
+        -- Don't clear existing diagnostics — wait for refresh to deliver fresh ones.
+        if #items == 0 and not from_refresh then
+          return
+        end
         local nvim_diags = {}
-        for _, d in ipairs(result.items or {}) do
+        for _, d in ipairs(items) do
           local diag_tags = nil
           if d.tags then
             diag_tags = {}
@@ -400,7 +421,6 @@ local function on_attach(bufnr, client, cfg)
 
   local DEBOUNCE_MS = 500
   local timer = vim.uv.new_timer()
-  local hl_timer = vim.uv.new_timer()
 
   -- Inlay hints state: defined before client_ready so request_hints is in scope.
   local request_hints
@@ -488,6 +508,16 @@ local function on_attach(bufnr, client, cfg)
         request_diagnostics({ skip_if_unchanged = true })
       end,
     })
+    -- Re-pull diagnostics when server signals background compile is done
+    vim.api.nvim_create_autocmd("User", {
+      group = group,
+      pattern = "JlsDiagnosticRefresh",
+      callback = function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          request_diagnostics({ from_refresh = true })
+        end
+      end,
+    })
 
     if request_hints then
       local bufname = vim.api.nvim_buf_get_name(bufnr)
@@ -513,62 +543,6 @@ local function on_attach(bufnr, client, cfg)
         })
       end
     end
-
-    -- Custom documentHighlight: debounced, cancelled on cursor move so it never
-    -- blocks navigation. Neovim's built-in version causes perceived latency.
-    -- Scoped to this client+buffer only — does not affect other LSP clients.
-    local hl_ns = vim.api.nvim_create_namespace("jls_document_highlight_" .. bufnr)
-    local HL_DEBOUNCE_MS = 300
-    local hl_request_id = nil
-
-    local function cancel_highlight()
-      if hl_request_id then
-        client.cancel_request(hl_request_id)
-        hl_request_id = nil
-      end
-    end
-
-    local function clear_highlights()
-      vim.api.nvim_buf_clear_namespace(bufnr, hl_ns, 0, -1)
-    end
-
-    vim.api.nvim_create_autocmd("CursorMoved", {
-      group = group,
-      buffer = bufnr,
-      callback = function()
-        hl_timer:stop()
-        cancel_highlight()
-        clear_highlights()
-        hl_timer:start(HL_DEBOUNCE_MS, 0, vim.schedule_wrap(function()
-          if not vim.api.nvim_buf_is_valid(bufnr) then return end
-          local success, req_id = client:request("textDocument/documentHighlight", {
-            textDocument = vim.lsp.util.make_text_document_params(bufnr),
-            position = vim.lsp.util.make_position_params(0, client.offset_encoding).position,
-          }, function(err, result)
-            hl_request_id = nil
-            clear_highlights()
-            if err or not result then return end
-            for _, ref in ipairs(result) do
-              local start = ref.range.start
-              local finish = ref.range["end"]
-              pcall(vim.api.nvim_buf_add_highlight, bufnr, hl_ns, "LspReferenceText", start.line, start.character, finish.character)
-            end
-          end, bufnr)
-          if success then
-            hl_request_id = req_id
-          end
-        end))
-      end,
-    })
-    vim.api.nvim_create_autocmd("InsertEnter", {
-      group = group,
-      buffer = bufnr,
-      callback = function()
-        hl_timer:stop()
-        cancel_highlight()
-        clear_highlights()
-      end,
-    })
 
     request_diagnostics()
     local bufname = vim.api.nvim_buf_get_name(bufnr)
@@ -608,10 +582,6 @@ local function on_attach(bufnr, client, cfg)
           timer:stop()
           timer:close()
         end
-        if not hl_timer:is_closing() then
-          hl_timer:stop()
-          hl_timer:close()
-        end
         pcall(vim.api.nvim_del_augroup_by_name, augroup)
       end
     end,
@@ -636,6 +606,11 @@ function M.make_lsp_config(state, opts)
     cmd_env = cmd_env,
     handlers = {
       ["window/showMessage"] = show_message_handler(root_dir),
+      ["workspace/diagnostic/refresh"] = function(_, _, _)
+        -- Server finished background compile — trigger diagnostic refresh for all JLS buffers
+        vim.api.nvim_exec_autocmds("User", { pattern = "JlsDiagnosticRefresh" })
+        return vim.NIL
+      end,
       ["java/renameFile"] = function(_, result, ctx)
         if not result or not result.oldPath or not result.newPath then
           return
