@@ -120,11 +120,9 @@ require("jls").setup({
 
 Hints appear only for files in your workspace. JDK and dependency sources opened via go-to-definition are not annotated.
 
-## Diagnostics and document highlight
+## Diagnostics
 
 Diagnostics are requested on `InsertLeave`, `BufWritePost`, and after 500ms of no edits in normal mode. They are not re-requested when navigating back to an unchanged buffer.
-
-Document highlight (symbol occurrences under cursor) is debounced at 300ms and cancelled immediately on cursor movement, so it never interferes with navigation like `gd`.
 
 ## Code actions
 
