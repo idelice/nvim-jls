@@ -543,11 +543,6 @@ local function on_attach(bufnr, client, cfg)
     end
 
     request_diagnostics()
-    local bufname = vim.api.nvim_buf_get_name(bufnr)
-    local root_dir = client.root_dir or ""
-    if request_hints and bufname:sub(1, #root_dir) == root_dir then
-      request_hints()
-    end
   end
 
   client_ready()
@@ -562,6 +557,9 @@ local function on_attach(bufnr, client, cfg)
         local val = ev.data.params and ev.data.params.value
         if val and val.kind == "end" and val.message == "Index ready" then
           request_diagnostics()
+          if request_hints then
+            request_hints()
+          end
           pcall(vim.api.nvim_del_augroup_by_name, "JlsIndexReady_" .. bufnr)
           return true
         end
