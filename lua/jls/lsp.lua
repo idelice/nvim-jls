@@ -165,6 +165,26 @@ local AUTO_RESTART_RESET_UPTIME = 60 -- seconds: reset counter if server ran thi
 
 local MAX_RECORDED_SERVER_MESSAGES = 20
 
+--- Walk up from path to find the multi-module build root (settings.gradle or pom.xml with <modules>).
+local function find_build_root(path)
+  local dir = path
+  while dir and dir ~= "/" do
+    if vim.fn.filereadable(dir .. "/settings.gradle") == 1
+        or vim.fn.filereadable(dir .. "/settings.gradle.kts") == 1 then
+      return dir
+    end
+    local pom = dir .. "/pom.xml"
+    if vim.fn.filereadable(pom) == 1 then
+      local content = vim.fn.readfile(pom, "", 50)
+      for _, line in ipairs(content) do
+        if line:find("<modules>") then return dir end
+      end
+    end
+    dir = vim.fn.fnamemodify(dir, ":h")
+  end
+  return nil
+end
+
 local function find_client_for_root(root_dir)
   for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
     if client.config and client.config.root_dir then
@@ -173,23 +193,11 @@ local function find_client_for_root(root_dir)
       if client_root == root_dir then
         return client
       end
-      -- Same multi-module project: both roots share a common ancestor with settings.gradle.
-      -- e.g. elasticsearch/server and elasticsearch/plugins/analysis-icu are siblings
-      -- under elasticsearch/ (which has settings.gradle). Reuse the same client.
-      local function find_settings_root(path)
-        local dir = path
-        while dir and dir ~= "/" do
-          if vim.fn.filereadable(dir .. "/settings.gradle") == 1
-              or vim.fn.filereadable(dir .. "/settings.gradle.kts") == 1 then
-            return dir
-          end
-          dir = vim.fn.fnamemodify(dir, ":h")
-        end
-        return nil
-      end
-      local client_settings_root = find_settings_root(client_root)
-      local new_settings_root = find_settings_root(root_dir)
-      if client_settings_root and client_settings_root == new_settings_root then
+      -- Same multi-module project: both roots share a common ancestor with settings.gradle
+      -- or a pom.xml containing <modules>.
+      local client_build_root = find_build_root(client_root)
+      local new_build_root = find_build_root(root_dir)
+      if client_build_root and client_build_root == new_build_root then
         return client
       end
     end
@@ -366,30 +374,12 @@ local function on_attach(bufnr, client, cfg)
   local group = vim.api.nvim_create_augroup(augroup, { clear = true })
   local ns = vim.lsp.diagnostic.get_namespace(client.id)
 
-  local last_diag_tick = nil
-  local refresh_pending = false
-
-  local function request_diagnostics(opts)
-    -- Skip if content hasn't changed since last successful request (e.g. BufEnter after gd).
-    local current_tick = vim.b[bufnr].changedtick
-    if opts and opts.skip_if_unchanged and current_tick == last_diag_tick then
-      return
-    end
-    last_diag_tick = current_tick
-    local from_refresh = opts and opts.from_refresh
+  local function request_diagnostics()
     client:request(
       "textDocument/diagnostic",
       { textDocument = vim.lsp.util.make_text_document_params(bufnr) },
       function(err, result)
-        if err or not result or result.kind ~= "full" then
-          return
-        end
         local items = result.items or {}
-        -- Empty response from a non-refresh request means compile is still pending.
-        -- Don't clear existing diagnostics — wait for refresh to deliver fresh ones.
-        if #items == 0 and not from_refresh then
-          return
-        end
         local nvim_diags = {}
         for _, d in ipairs(items) do
           local diag_tags = nil
@@ -492,10 +482,18 @@ local function on_attach(bufnr, client, cfg)
         timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(request_diagnostics))
       end,
     })
-    vim.api.nvim_create_autocmd({ "InsertLeave", "BufWritePost" }, {
+    vim.api.nvim_create_autocmd("InsertLeave", {
       group = group,
       buffer = bufnr,
       callback = request_diagnostics,
+    })
+    vim.api.nvim_create_autocmd("BufWritePost", {
+      group = group,
+      buffer = bufnr,
+      callback = function()
+        timer:stop()
+        timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(request_diagnostics))
+      end,
     })
     vim.api.nvim_create_autocmd("BufEnter", {
       group = group,
@@ -505,7 +503,7 @@ local function on_attach(bufnr, client, cfg)
         if vim.api.nvim_win_get_config(win).relative ~= "" then
           return
         end
-        request_diagnostics({ skip_if_unchanged = true })
+        request_diagnostics()
       end,
     })
     -- Re-pull diagnostics when server signals background compile is done
@@ -514,7 +512,7 @@ local function on_attach(bufnr, client, cfg)
       pattern = "JlsDiagnosticRefresh",
       callback = function()
         if vim.api.nvim_buf_is_valid(bufnr) then
-          request_diagnostics({ from_refresh = true })
+          request_diagnostics()
         end
       end,
     })
@@ -644,7 +642,8 @@ function M.make_lsp_config(state, opts)
       on_attach(bufnr, client, cfg)
     end,
     root_dir = function(fname)
-      return root.resolve_root(fname, cfg)
+      local module_root = root.resolve_root(fname, cfg)
+      return find_build_root(module_root) or module_root
     end,
     settings = build_settings(cfg),
   }
@@ -715,6 +714,17 @@ function M.start(state, opts, control)
   end
 
   local _, fallback = root.resolve_root_info(vim.api.nvim_buf_get_name(0), state.config)
+
+  -- If no root markers found, attach to any existing JLS client rather than spawning
+  -- a new server. This prevents new server instances for decompiled/external files.
+  if fallback then
+    local any_jls = vim.lsp.get_clients({ name = "jls" })
+    if #any_jls > 0 then
+      pcall(vim.lsp.buf_attach_client, bufnr, any_jls[1].id)
+      return
+    end
+  end
+
   if fallback and not warned_roots[root_dir] then
     warned_roots[root_dir] = true
     util.notify("JLS: root markers not found; using cwd: " .. root_dir, vim.log.levels.WARN)
