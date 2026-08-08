@@ -338,6 +338,8 @@ local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
   end
+  client.server_capabilities.documentSymbolProvider = nil
+  client.server_capabilities.inlayHintProvider = nil
 
   -- Patch exec_cmd to intercept java.pickAndGenerate before it is sent to the
   -- server, so we can show the picker and issue java.generateFields ourselves.
@@ -374,11 +376,29 @@ local function on_attach(bufnr, client, cfg)
   local group = vim.api.nvim_create_augroup(augroup, { clear = true })
   local ns = vim.lsp.diagnostic.get_namespace(client.id)
 
+  local diagnostic_timer = vim.uv.new_timer()
+  local diagnostic_generation = 0
+  local request_hints
+
   local function request_diagnostics()
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    diagnostic_timer:stop()
+    diagnostic_generation = diagnostic_generation + 1
+    local request_generation = diagnostic_generation
+    local request_tick = vim.b[bufnr].changedtick
     client:request(
       "textDocument/diagnostic",
       { textDocument = vim.lsp.util.make_text_document_params(bufnr) },
       function(err, result)
+        if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then
+          return
+        end
+        if request_generation ~= diagnostic_generation
+            or request_tick ~= vim.b[bufnr].changedtick then
+          return
+        end
         local items = result.items or {}
         local nvim_diags = {}
         for _, d in ipairs(items) do
@@ -393,8 +413,8 @@ local function on_attach(bufnr, client, cfg)
           table.insert(nvim_diags, {
             lnum = d.range.start.line,
             end_lnum = d.range["end"].line,
-            col = d.range.start.character,
-            end_col = d.range["end"].character,
+            col = vim.lsp.util._get_line_byte_from_position(bufnr, d.range.start, client.offset_encoding),
+            end_col = vim.lsp.util._get_line_byte_from_position(bufnr, d.range["end"], client.offset_encoding),
             severity = d.severity,
             message = d.message,
             source = d.source,
@@ -404,16 +424,19 @@ local function on_attach(bufnr, client, cfg)
           })
         end
         vim.diagnostic.set(ns, bufnr, nvim_diags)
+        if request_hints then
+          request_hints(request_generation, request_tick)
+        end
       end,
       bufnr
     )
   end
 
-  local DEBOUNCE_MS = 500
-  local timer = vim.uv.new_timer()
+  local function request_diagnostics_after_typing()
+    diagnostic_timer:stop()
+    diagnostic_timer:start(500, 0, vim.schedule_wrap(request_diagnostics))
+  end
 
-  -- Inlay hints state: defined before client_ready so request_hints is in scope.
-  local request_hints
   if cfg.inlay_hints and cfg.inlay_hints.enabled then
     local hint_ns = vim.api.nvim_create_namespace("jls_inlay_hints_" .. bufnr)
 
@@ -428,7 +451,8 @@ local function on_attach(bufnr, client, cfg)
         if hint.paddingRight then
           label = label .. " "
         end
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, hint_ns, hint.position.line, hint.position.character, {
+        local col = vim.lsp.util._get_line_byte_from_position(bufnr, hint.position, client.offset_encoding)
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, hint_ns, hint.position.line, col, {
           virt_text = { { label, "LspInlayHint" } },
           virt_text_pos = "inline",
           hl_mode = "combine",
@@ -436,37 +460,19 @@ local function on_attach(bufnr, client, cfg)
       end
     end
 
-    local hint_pending = false
-    local last_hint_file = nil
-    local last_hint_tick = nil
-    request_hints = function(opts)
-      -- On BufEnter, skip re-requesting if the file and content haven't changed.
-      if opts and opts.skip_if_unchanged then
-        local current_file = vim.api.nvim_buf_get_name(bufnr)
-        local current_tick = vim.b[bufnr].changedtick
-        if current_file == last_hint_file and current_tick == last_hint_tick then
-          return
-        end
-      end
-      if hint_pending or not vim.api.nvim_buf_is_valid(bufnr) then
-        return
-      end
-      hint_pending = true
-      local line_count = vim.api.nvim_buf_line_count(bufnr)
+    request_hints = function(request_generation, request_tick)
       client:request("textDocument/inlayHint", {
         textDocument = vim.lsp.util.make_text_document_params(bufnr),
         range = {
           start = { line = 0, character = 0 },
-          ["end"] = { line = line_count, character = 0 },
+          ["end"] = { line = vim.api.nvim_buf_line_count(bufnr), character = 0 },
         },
       }, function(err, result)
-        hint_pending = false
-        if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then
-          return
+        if not err and result and vim.api.nvim_buf_is_valid(bufnr)
+            and request_tick == vim.b[bufnr].changedtick
+            and request_generation == diagnostic_generation then
+          apply_hints(result)
         end
-        apply_hints(result)
-        last_hint_file = vim.api.nvim_buf_get_name(bufnr)
-        last_hint_tick = vim.b[bufnr].changedtick
       end, bufnr)
     end
   end
@@ -477,10 +483,12 @@ local function on_attach(bufnr, client, cfg)
     vim.api.nvim_create_autocmd("TextChanged", {
       group = group,
       buffer = bufnr,
-      callback = function()
-        timer:stop()
-        timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(request_diagnostics))
-      end,
+      callback = request_diagnostics_after_typing,
+    })
+    vim.api.nvim_create_autocmd("TextChangedI", {
+      group = group,
+      buffer = bufnr,
+      callback = request_diagnostics_after_typing,
     })
     vim.api.nvim_create_autocmd("InsertLeave", {
       group = group,
@@ -490,10 +498,7 @@ local function on_attach(bufnr, client, cfg)
     vim.api.nvim_create_autocmd("BufWritePost", {
       group = group,
       buffer = bufnr,
-      callback = function()
-        timer:stop()
-        timer:start(DEBOUNCE_MS, 0, vim.schedule_wrap(request_diagnostics))
-      end,
+      callback = request_diagnostics_after_typing,
     })
     vim.api.nvim_create_autocmd("BufEnter", {
       group = group,
@@ -511,72 +516,28 @@ local function on_attach(bufnr, client, cfg)
       group = group,
       pattern = "JlsDiagnosticRefresh",
       callback = function()
-        if vim.api.nvim_buf_is_valid(bufnr) then
+        if vim.api.nvim_buf_is_valid(bufnr) and vim.fn.bufwinid(bufnr) ~= -1 then
           request_diagnostics()
         end
       end,
     })
 
-    if request_hints then
-      local bufname = vim.api.nvim_buf_get_name(bufnr)
-      local root_dir = client.root_dir or ""
-      if bufname:sub(1, #root_dir) == root_dir then
-        vim.api.nvim_create_autocmd("InsertLeave", {
-          group = group,
-          buffer = bufnr,
-          callback = request_hints,
-        })
-        vim.api.nvim_create_autocmd("BufEnter", {
-          group = group,
-          buffer = bufnr,
-          callback = function()
-            local win = vim.api.nvim_get_current_win()
-            if vim.api.nvim_win_get_config(win).relative ~= "" then
-              return
-            end
-            if vim.api.nvim_get_mode().mode:sub(1, 1) ~= "i" then
-              request_hints({ skip_if_unchanged = true })
-            end
-          end,
-        })
-      end
+    if vim.fn.bufwinid(bufnr) ~= -1 then
+      request_diagnostics()
     end
-
-    request_diagnostics()
   end
 
   client_ready()
-
-  -- Listen for the initial workspace index completion to trigger first diagnostics.
-  -- Fires only once (the first "Index ready" after attach), then removes itself.
-  local index_ready_group = vim.api.nvim_create_augroup("JlsIndexReady_" .. bufnr, { clear = true })
-  vim.api.nvim_create_autocmd("LspProgress", {
-    group = index_ready_group,
-    callback = function(ev)
-      if ev.data and ev.data.client_id == client.id then
-        local val = ev.data.params and ev.data.params.value
-        if val and val.kind == "end" and val.message == "Index ready" then
-          request_diagnostics()
-          if request_hints then
-            request_hints()
-          end
-          pcall(vim.api.nvim_del_augroup_by_name, "JlsIndexReady_" .. bufnr)
-          return true
-        end
-      end
-    end,
-  })
 
   -- Clean up timer and autocmds when jls detaches from this buffer.
   vim.api.nvim_create_autocmd("LspDetach", {
     group = group,
     buffer = bufnr,
-    once = true,
     callback = function(ev)
       if ev.data.client_id == client.id then
-        if not timer:is_closing() then
-          timer:stop()
-          timer:close()
+        if not diagnostic_timer:is_closing() then
+          diagnostic_timer:stop()
+          diagnostic_timer:close()
         end
         pcall(vim.api.nvim_del_augroup_by_name, augroup)
       end
@@ -603,7 +564,7 @@ function M.make_lsp_config(state, opts)
     handlers = {
       ["window/showMessage"] = show_message_handler(root_dir),
       ["workspace/diagnostic/refresh"] = function(_, _, _)
-        -- Server finished background compile — trigger diagnostic refresh for all JLS buffers
+        -- Refresh visible buffers now. Hidden buffers refresh when entered.
         vim.api.nvim_exec_autocmds("User", { pattern = "JlsDiagnosticRefresh" })
         return vim.NIL
       end,
