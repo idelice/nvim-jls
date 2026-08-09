@@ -378,6 +378,7 @@ local function on_attach(bufnr, client, cfg)
 
   local diagnostic_timer = vim.uv.new_timer()
   local diagnostic_generation = 0
+  local diagnostic_result_id
   local request_hints
 
   local function request_diagnostics()
@@ -388,9 +389,11 @@ local function on_attach(bufnr, client, cfg)
     diagnostic_generation = diagnostic_generation + 1
     local request_generation = diagnostic_generation
     local request_tick = vim.b[bufnr].changedtick
+    local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
+    params.previousResultId = diagnostic_result_id
     client:request(
       "textDocument/diagnostic",
-      { textDocument = vim.lsp.util.make_text_document_params(bufnr) },
+      params,
       function(err, result)
         if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then
           return
@@ -399,6 +402,11 @@ local function on_attach(bufnr, client, cfg)
             or request_tick ~= vim.b[bufnr].changedtick then
           return
         end
+        if result.kind == "unchanged" then
+          diagnostic_result_id = result.resultId or diagnostic_result_id
+          return
+        end
+        diagnostic_result_id = result.resultId
         local items = result.items or {}
         local nvim_diags = {}
         for _, d in ipairs(items) do
