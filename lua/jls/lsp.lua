@@ -156,6 +156,8 @@ end
 local warned_roots = {}
 local shown_server_messages = {}
 local recent_server_messages = {}
+local workspace_info = {}
+local pending_starts = {}
 
 -- Auto-restart backoff state, keyed by root_dir
 local auto_restart_attempts = {}
@@ -165,45 +167,59 @@ local AUTO_RESTART_RESET_UPTIME = 60 -- seconds: reset counter if server ran thi
 
 local MAX_RECORDED_SERVER_MESSAGES = 20
 
---- Walk up from path to find the multi-module build root (settings.gradle or pom.xml with <modules>).
-local function find_build_root(path)
+--- Walk up from path to find the Gradle build root.
+local function find_gradle_build_root(path)
+  path = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
   local dir = path
   while dir and dir ~= "/" do
     if vim.fn.filereadable(dir .. "/settings.gradle") == 1
         or vim.fn.filereadable(dir .. "/settings.gradle.kts") == 1 then
       return dir
     end
-    local pom = dir .. "/pom.xml"
-    if vim.fn.filereadable(pom) == 1 then
-      local content = vim.fn.readfile(pom, "", 50)
-      for _, line in ipairs(content) do
-        if line:find("<modules>") then return dir end
-      end
-    end
     dir = vim.fn.fnamemodify(dir, ":h")
   end
-  return nil
 end
 
-local function find_client_for_root(root_dir)
+local function normalize_path(path)
+  local absolute = vim.fs.normalize(vim.fn.fnamemodify(path, ":p")):gsub("/$", "")
+  return vim.uv.fs_realpath(absolute) or absolute
+end
+
+local function path_is_under(path, root_dir)
+  path = normalize_path(path)
+  root_dir = normalize_path(root_dir)
+  return path == root_dir or path:sub(1, #root_dir + 1) == root_dir .. "/"
+end
+
+local function find_client(root_dir, file)
+  local waiting = false
   for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
     if client.config and client.config.root_dir then
       local client_root = client.config.root_dir
-      -- Exact match
       if client_root == root_dir then
-        return client
+        return client, false
       end
-      -- Same multi-module project: both roots share a common ancestor with settings.gradle
-      -- or a pom.xml containing <modules>.
-      local client_build_root = find_build_root(client_root)
-      local new_build_root = find_build_root(root_dir)
+      local client_build_root = find_gradle_build_root(client_root)
+      local new_build_root = find_gradle_build_root(root_dir)
       if client_build_root and client_build_root == new_build_root then
-        return client
+        return client, false
+      end
+      local info = workspace_info[client.id]
+      if info then
+        for _, source_root in ipairs(info.sourceRoots or {}) do
+          if path_is_under(file, source_root) then
+            return client, false
+          end
+        end
+      else
+        waiting = true
       end
     end
   end
-  return nil
+  return nil, waiting
 end
+
+local retry_pending_starts
 
 local function get_lsp_log_path()
   local ok, path = pcall(vim.lsp.get_log_path)
@@ -553,6 +569,38 @@ local function on_attach(bufnr, client, cfg)
   })
 end
 
+retry_pending_starts = function()
+  local waiting = false
+  for bufnr, pending in pairs(pending_starts) do
+    if not vim.api.nvim_buf_is_valid(bufnr)
+        or vim.api.nvim_buf_get_name(bufnr) ~= pending.file then
+      pending_starts[bufnr] = nil
+    else
+      local client, client_pending = find_client(pending.root_dir, pending.file)
+      if client then
+        local ok, attached = pcall(vim.lsp.buf_attach_client, bufnr, client.id)
+        if ok and attached then
+          pending_starts[bufnr] = nil
+        else
+          waiting = true
+        end
+      elseif client_pending then
+        waiting = true
+      end
+    end
+  end
+  if waiting then
+    return
+  end
+  for bufnr, pending in pairs(pending_starts) do
+    pending_starts[bufnr] = nil
+    vim.api.nvim_buf_call(bufnr, function()
+      M.start(pending.state, pending.opts, pending.control)
+    end)
+    break
+  end
+end
+
 ---@param state table
 ---@param opts JlsConfig|nil
 ---@return table|nil
@@ -571,6 +619,10 @@ function M.make_lsp_config(state, opts)
     cmd_env = cmd_env,
     handlers = {
       ["window/showMessage"] = show_message_handler(root_dir),
+      ["java/workspaceInfo"] = function(_, result, ctx)
+        workspace_info[ctx.client_id] = result or {}
+        vim.schedule(retry_pending_starts)
+      end,
       ["workspace/diagnostic/refresh"] = function(_, _, _)
         -- Refresh visible buffers now. Hidden buffers refresh when entered.
         vim.api.nvim_exec_autocmds("User", { pattern = "JlsDiagnosticRefresh" })
@@ -598,26 +650,36 @@ function M.make_lsp_config(state, opts)
         vim.lsp.util.apply_workspace_edit(result, client.offset_encoding)
         local pending = _pending_java_rename[ctx.client_id]
         _pending_java_rename[ctx.client_id] = nil
-        if pending then
-          vim.schedule(function()
+        vim.schedule(function()
+          if pending then
             require("jls.commands").handle_rename_file(pending)
-          end)
-        end
+          end
+          local changes = {}
+          for uri, _ in pairs(result.changes or {}) do
+            if pending and vim.uri_to_fname(uri) == pending.oldPath then
+              uri = vim.uri_from_fname(pending.newPath)
+            end
+            table.insert(changes, { uri = uri, type = 2 })
+          end
+          if #changes > 0 then
+            client:notify("java/renameApplied", { changes = changes })
+          end
+        end)
       end,
     },
     on_attach = function(client, bufnr)
       on_attach(bufnr, client, cfg)
     end,
     root_dir = function(fname)
-      local module_root = root.resolve_root(fname, cfg)
-      return find_build_root(module_root) or module_root
+      return root.resolve_root(fname, cfg)
     end,
     settings = build_settings(cfg),
   }
 
+  local restart_on_exit
   if cfg.auto_restart then
     local start_time = vim.uv.now()
-    lsp_cfg.on_exit = function(code, signal)
+    restart_on_exit = function(code, signal)
       -- clean exit → don't restart
       if code == 0 and signal == 0 then
         auto_restart_attempts[root_dir] = nil
@@ -653,6 +715,13 @@ function M.make_lsp_config(state, opts)
       end, delay)
     end
   end
+  lsp_cfg.on_exit = function(code, signal, client_id)
+    workspace_info[client_id] = nil
+    vim.schedule(retry_pending_starts)
+    if restart_on_exit then
+      restart_on_exit(code, signal)
+    end
+  end
 
   state._last_resolved_cfg = cfg
   return lsp_cfg
@@ -674,7 +743,8 @@ function M.start(state, opts, control)
     root_dir = root_dir(vim.api.nvim_buf_get_name(0)) or vim.fn.getcwd()
   end
 
-  local existing = find_client_for_root(root_dir)
+  local file = vim.api.nvim_buf_get_name(bufnr)
+  local existing, client_pending = find_client(root_dir, file)
   if existing then
     pcall(vim.lsp.buf_attach_client, bufnr, existing.id)
     return
@@ -690,6 +760,17 @@ function M.start(state, opts, control)
       pcall(vim.lsp.buf_attach_client, bufnr, any_jls[1].id)
       return
     end
+  end
+
+  if client_pending then
+    pending_starts[bufnr] = {
+      state = state,
+      opts = opts,
+      control = control,
+      root_dir = root_dir,
+      file = file,
+    }
+    return
   end
 
   if fallback and not warned_roots[root_dir] then
