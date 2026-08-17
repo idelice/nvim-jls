@@ -354,7 +354,6 @@ local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
   end
-  client.server_capabilities.documentSymbolProvider = nil
   client.server_capabilities.inlayHintProvider = nil
 
   -- Patch exec_cmd to intercept java.pickAndGenerate before it is sent to the
