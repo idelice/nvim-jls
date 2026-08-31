@@ -10,6 +10,7 @@ local M = {}
 -- AFTER the WorkspaceEdit is applied to all buffers.
 -- Keyed by client_id to avoid cross-client interference in multi-root workspaces.
 local _pending_java_rename = {}
+local _diagnostic_refresh_generation = {}
 
 -- Run the picker and generate accessor methods.
 -- Works for both the workspace/executeCommand response path (nvim ≤0.10)
@@ -394,6 +395,9 @@ local function on_attach(bufnr, client, cfg)
   local diagnostic_timer = vim.uv.new_timer()
   local diagnostic_generation = 0
   local diagnostic_result_id
+  local diagnostic_seen_refresh_generation
+  local diagnostic_inflight_generation
+  local diagnostic_inflight_refresh_generation
   local request_hints
 
   local function request_diagnostics()
@@ -401,8 +405,11 @@ local function on_attach(bufnr, client, cfg)
       return
     end
     diagnostic_timer:stop()
+    local client_generation = _diagnostic_refresh_generation[client.id] or 0
     diagnostic_generation = diagnostic_generation + 1
     local request_generation = diagnostic_generation
+    diagnostic_inflight_generation = request_generation
+    diagnostic_inflight_refresh_generation = client_generation
     local request_tick = vim.b[bufnr].changedtick
     local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
     params.previousResultId = diagnostic_result_id
@@ -410,6 +417,10 @@ local function on_attach(bufnr, client, cfg)
       "textDocument/diagnostic",
       params,
       function(err, result)
+        if diagnostic_inflight_generation == request_generation then
+          diagnostic_inflight_generation = nil
+          diagnostic_inflight_refresh_generation = nil
+        end
         if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then
           return
         end
@@ -419,6 +430,7 @@ local function on_attach(bufnr, client, cfg)
         end
         if result.kind == "unchanged" then
           diagnostic_result_id = result.resultId or diagnostic_result_id
+          diagnostic_seen_refresh_generation = client_generation
           return
         end
         diagnostic_result_id = result.resultId
@@ -447,6 +459,7 @@ local function on_attach(bufnr, client, cfg)
           })
         end
         vim.diagnostic.set(ns, bufnr, nvim_diags)
+        diagnostic_seen_refresh_generation = client_generation
         if request_hints then
           request_hints(request_generation, request_tick)
         end
@@ -502,6 +515,19 @@ local function on_attach(bufnr, client, cfg)
 
   -- on_attach IS the client-ready signal. Register autocmds and fire initial
   -- requests here directly — no vim.schedule needed.
+  local function request_if_stale()
+    if not vim.api.nvim_buf_is_valid(bufnr) or vim.fn.bufwinid(bufnr) == -1 then
+      return
+    end
+    local generation = _diagnostic_refresh_generation[client.id] or 0
+    if diagnostic_seen_refresh_generation ~= generation
+        and diagnostic_inflight_refresh_generation ~= generation then
+      vim.lsp.log.info("[jls] stale diagnostic activation pull buffer=" .. bufnr
+        .. " generation=" .. generation)
+      request_diagnostics()
+    end
+  end
+
   local function client_ready()
     vim.api.nvim_create_autocmd("TextChanged", {
       group = group,
@@ -531,17 +557,20 @@ local function on_attach(bufnr, client, cfg)
         if vim.api.nvim_win_get_config(win).relative ~= "" then
           return
         end
-        request_diagnostics()
+        request_if_stale()
       end,
+    })
+    vim.api.nvim_create_autocmd("WinEnter", {
+      group = group,
+      buffer = bufnr,
+      callback = request_if_stale,
     })
     -- Re-pull diagnostics when server signals background compile is done
     vim.api.nvim_create_autocmd("User", {
       group = group,
       pattern = "JlsDiagnosticRefresh",
       callback = function()
-        if vim.api.nvim_buf_is_valid(bufnr) and vim.fn.bufwinid(bufnr) ~= -1 then
-          request_diagnostics()
-        end
+        request_if_stale()
       end,
     })
 
@@ -622,8 +651,12 @@ function M.make_lsp_config(state, opts)
         workspace_info[ctx.client_id] = result or {}
         vim.schedule(retry_pending_starts)
       end,
-      ["workspace/diagnostic/refresh"] = function(_, _, _)
-        -- Refresh visible buffers now. Hidden buffers refresh when entered.
+      ["workspace/diagnostic/refresh"] = function(_, _, ctx)
+        local client_id = ctx.client_id
+        _diagnostic_refresh_generation[client_id] = (_diagnostic_refresh_generation[client_id] or 0) + 1
+        vim.lsp.log.info("[jls] diagnostic refresh generation="
+          .. _diagnostic_refresh_generation[client_id] .. " client=" .. client_id)
+        -- Pull visible buffers now; hidden buffers pull once when entered.
         vim.api.nvim_exec_autocmds("User", { pattern = "JlsDiagnosticRefresh" })
         return vim.NIL
       end,
