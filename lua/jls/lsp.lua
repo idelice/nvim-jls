@@ -399,6 +399,7 @@ local function on_attach(bufnr, client, cfg)
   local diagnostic_inflight_generation
   local diagnostic_inflight_refresh_generation
   local request_hints
+  local request_hints_if_missing = function(_, _) end
 
   local function request_diagnostics()
     if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -431,6 +432,7 @@ local function on_attach(bufnr, client, cfg)
         if result.kind == "unchanged" then
           diagnostic_result_id = result.resultId or diagnostic_result_id
           diagnostic_seen_refresh_generation = client_generation
+          request_hints_if_missing(request_generation, request_tick)
           return
         end
         diagnostic_result_id = result.resultId
@@ -511,6 +513,35 @@ local function on_attach(bufnr, client, cfg)
         end
       end, bufnr)
     end
+
+    local hints_inflight = false
+    request_hints_if_missing = function(request_generation, request_tick)
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+      if hints_inflight then
+        return
+      end
+      local existing = vim.api.nvim_buf_get_extmarks(bufnr, hint_ns, 0, -1, { limit = 1 })
+      if #existing > 0 then
+        return
+      end
+      hints_inflight = true
+      client:request("textDocument/inlayHint", {
+        textDocument = vim.lsp.util.make_text_document_params(bufnr),
+        range = {
+          start = { line = 0, character = 0 },
+          ["end"] = { line = vim.api.nvim_buf_line_count(bufnr), character = 0 },
+        },
+      }, function(err, result)
+        hints_inflight = false
+        if not err and result and vim.api.nvim_buf_is_valid(bufnr)
+            and request_tick == vim.b[bufnr].changedtick
+            and request_generation == diagnostic_generation then
+          apply_hints(result)
+        end
+      end, bufnr)
+    end
   end
 
   -- on_attach IS the client-ready signal. Register autocmds and fire initial
@@ -575,7 +606,11 @@ local function on_attach(bufnr, client, cfg)
     })
 
     if vim.fn.bufwinid(bufnr) ~= -1 then
-      request_diagnostics()
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          request_diagnostics()
+        end
+      end)
     end
   end
 
