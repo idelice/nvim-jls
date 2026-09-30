@@ -159,6 +159,7 @@ local shown_server_messages = {}
 local recent_server_messages = {}
 local workspace_info = {}
 local pending_starts = {}
+local _inlay_hint_appliers = {} -- uri -> apply_hints function, set per-buffer in on_attach
 
 -- Auto-restart backoff state, keyed by root_dir
 local auto_restart_attempts = {}
@@ -398,8 +399,7 @@ local function on_attach(bufnr, client, cfg)
   local diagnostic_seen_refresh_generation
   local diagnostic_inflight_generation
   local diagnostic_inflight_refresh_generation
-  local request_hints
-  local request_hints_if_missing = function(_, _) end
+  local request_hints_if_missing
 
   local function request_diagnostics()
     if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -432,7 +432,7 @@ local function on_attach(bufnr, client, cfg)
         if result.kind == "unchanged" then
           diagnostic_result_id = result.resultId or diagnostic_result_id
           diagnostic_seen_refresh_generation = client_generation
-          request_hints_if_missing(request_generation, request_tick)
+          if request_hints_if_missing then request_hints_if_missing() end
           return
         end
         diagnostic_result_id = result.resultId
@@ -462,9 +462,6 @@ local function on_attach(bufnr, client, cfg)
         end
         vim.diagnostic.set(ns, bufnr, nvim_diags)
         diagnostic_seen_refresh_generation = client_generation
-        if request_hints then
-          request_hints(request_generation, request_tick)
-        end
       end,
       bufnr
     )
@@ -498,28 +495,15 @@ local function on_attach(bufnr, client, cfg)
       end
     end
 
-    request_hints = function(request_generation, request_tick)
-      client:request("textDocument/inlayHint", {
-        textDocument = vim.lsp.util.make_text_document_params(bufnr),
-        range = {
-          start = { line = 0, character = 0 },
-          ["end"] = { line = vim.api.nvim_buf_line_count(bufnr), character = 0 },
-        },
-      }, function(err, result)
-        if not err and result and vim.api.nvim_buf_is_valid(bufnr)
-            and request_tick == vim.b[bufnr].changedtick
-            and request_generation == diagnostic_generation then
-          apply_hints(result)
-        end
-      end, bufnr)
-    end
+    local buf_uri = vim.uri_to_fname(vim.uri_from_bufnr(bufnr))
+    _inlay_hint_appliers[buf_uri] = apply_hints
 
+    -- Hints arrive via java/inlayHints push notification piggybacked on each
+    -- diagnostics compile. When diagnostics returns "unchanged" (no recompile),
+    -- no push arrives — fall back to a standalone request if hints are missing.
     local hints_inflight = false
-    request_hints_if_missing = function(request_generation, request_tick)
-      if not vim.api.nvim_buf_is_valid(bufnr) then
-        return
-      end
-      if hints_inflight then
+    local function request_hints_if_missing_impl()
+      if hints_inflight or not vim.api.nvim_buf_is_valid(bufnr) then
         return
       end
       local existing = vim.api.nvim_buf_get_extmarks(bufnr, hint_ns, 0, -1, { limit = 1 })
@@ -535,13 +519,12 @@ local function on_attach(bufnr, client, cfg)
         },
       }, function(err, result)
         hints_inflight = false
-        if not err and result and vim.api.nvim_buf_is_valid(bufnr)
-            and request_tick == vim.b[bufnr].changedtick
-            and request_generation == diagnostic_generation then
+        if not err and result and vim.api.nvim_buf_is_valid(bufnr) then
           apply_hints(result)
         end
       end, bufnr)
     end
+    request_hints_if_missing = request_hints_if_missing_impl
   end
 
   -- on_attach IS the client-ready signal. Register autocmds and fire initial
@@ -626,6 +609,7 @@ local function on_attach(bufnr, client, cfg)
           diagnostic_timer:stop()
           diagnostic_timer:close()
         end
+        _inlay_hint_appliers[vim.uri_to_fname(vim.uri_from_bufnr(bufnr))] = nil
         pcall(vim.api.nvim_del_augroup_by_name, augroup)
       end
     end,
@@ -685,6 +669,16 @@ function M.make_lsp_config(state, opts)
       ["java/workspaceInfo"] = function(_, result, ctx)
         workspace_info[ctx.client_id] = result or {}
         vim.schedule(retry_pending_starts)
+      end,
+      ["java/inlayHints"] = function(_, result)
+        if not result or not result.uri or not result.hints then
+          return
+        end
+        local fname = vim.uri_to_fname(result.uri)
+        local applier = _inlay_hint_appliers[fname]
+        if applier then
+          vim.schedule(function() applier(result.hints) end)
+        end
       end,
       ["workspace/diagnostic/refresh"] = function(_, _, ctx)
         local client_id = ctx.client_id
