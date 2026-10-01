@@ -10,7 +10,6 @@ local M = {}
 -- AFTER the WorkspaceEdit is applied to all buffers.
 -- Keyed by client_id to avoid cross-client interference in multi-root workspaces.
 local _pending_java_rename = {}
-local _diagnostic_refresh_generation = {}
 
 -- Run the picker and generate accessor methods.
 -- Works for both the workspace/executeCommand response path (nvim ≤0.10)
@@ -382,94 +381,33 @@ local function on_attach(bufnr, client, cfg)
     return
   end
 
-  -- Neovim's default pull-diagnostic trigger fires on every textDocument/didChange
-  -- (debounced at ~150ms), causing a full javac compile on each keystroke.
-  -- Clearing diagnosticProvider before vim.schedule runs the capability setup
-  -- prevents Neovim from attaching its LspNotify/didChange → diagnostic pull
-  -- machinery for this buffer entirely.
-  client.server_capabilities.diagnosticProvider = nil
+  -- Server pushes diagnostics via publishDiagnostics. Neovim's built-in handler
+  -- renders them. The client nudges the server to compile after typing pauses.
 
   local augroup = "JlsDiagnostics_" .. bufnr
   local group = vim.api.nvim_create_augroup(augroup, { clear = true })
-  local ns = vim.lsp.diagnostic.get_namespace(client.id)
 
   local diagnostic_timer = vim.uv.new_timer()
-  local diagnostic_generation = 0
-  local diagnostic_result_id
-  local diagnostic_seen_refresh_generation
-  local diagnostic_inflight_generation
-  local diagnostic_inflight_refresh_generation
-  local request_hints_if_missing
 
-  local function request_diagnostics()
-    if not vim.api.nvim_buf_is_valid(bufnr) then
-      return
-    end
+  local function nudge_current_debounced()
+    if not vim.api.nvim_buf_is_valid(bufnr) then return end
     diagnostic_timer:stop()
-    local client_generation = _diagnostic_refresh_generation[client.id] or 0
-    diagnostic_generation = diagnostic_generation + 1
-    local request_generation = diagnostic_generation
-    diagnostic_inflight_generation = request_generation
-    diagnostic_inflight_refresh_generation = client_generation
-    local request_tick = vim.b[bufnr].changedtick
-    local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
-    params.previousResultId = diagnostic_result_id
-    client:request(
-      "textDocument/diagnostic",
-      params,
-      function(err, result)
-        if diagnostic_inflight_generation == request_generation then
-          diagnostic_inflight_generation = nil
-          diagnostic_inflight_refresh_generation = nil
-        end
-        if err or not result or not vim.api.nvim_buf_is_valid(bufnr) then
-          return
-        end
-        if request_generation ~= diagnostic_generation
-            or request_tick ~= vim.b[bufnr].changedtick then
-          return
-        end
-        if result.kind == "unchanged" then
-          diagnostic_result_id = result.resultId or diagnostic_result_id
-          diagnostic_seen_refresh_generation = client_generation
-          if request_hints_if_missing then request_hints_if_missing() end
-          return
-        end
-        diagnostic_result_id = result.resultId
-        local items = result.items or {}
-        local nvim_diags = {}
-        for _, d in ipairs(items) do
-          local diag_tags = nil
-          if d.tags then
-            diag_tags = {}
-            for _, tag in ipairs(d.tags) do
-              if tag == 1 then diag_tags.unnecessary = true end
-              if tag == 2 then diag_tags.deprecated = true end
-            end
-          end
-          table.insert(nvim_diags, {
-            lnum = d.range.start.line,
-            end_lnum = d.range["end"].line,
-            col = vim.lsp.util._get_line_byte_from_position(bufnr, d.range.start, client.offset_encoding),
-            end_col = vim.lsp.util._get_line_byte_from_position(bufnr, d.range["end"], client.offset_encoding),
-            severity = d.severity,
-            message = d.message,
-            source = d.source,
-            code = d.code,
-            _tags = diag_tags,
-            user_data = { lsp = d },
-          })
-        end
-        vim.diagnostic.set(ns, bufnr, nvim_diags)
-        diagnostic_seen_refresh_generation = client_generation
-      end,
-      bufnr
-    )
+    diagnostic_timer:start(200, 0, vim.schedule_wrap(function()
+      if not vim.api.nvim_buf_is_valid(bufnr) then return end
+      client:request("textDocument/diagnostic", {
+        textDocument = vim.lsp.util.make_text_document_params(bufnr),
+      }, function() end, bufnr)
+    end))
   end
 
-  local function request_diagnostics_after_typing()
+  local function nudge_current()
+    if not vim.api.nvim_buf_is_valid(bufnr) then return end
     diagnostic_timer:stop()
-    diagnostic_timer:start(500, 0, vim.schedule_wrap(request_diagnostics))
+    -- The server compiles this file, then propagates diagnostics to any open
+    -- buffers that depend on it — no need to nudge other buffers from the client.
+    client:request("textDocument/diagnostic", {
+      textDocument = vim.lsp.util.make_text_document_params(bufnr),
+    }, function() end, bufnr)
   end
 
   if cfg.inlay_hints and cfg.inlay_hints.enabled then
@@ -497,109 +435,19 @@ local function on_attach(bufnr, client, cfg)
 
     local buf_uri = vim.uri_to_fname(vim.uri_from_bufnr(bufnr))
     _inlay_hint_appliers[buf_uri] = apply_hints
-
-    -- Hints arrive via java/inlayHints push notification piggybacked on each
-    -- diagnostics compile. When diagnostics returns "unchanged" (no recompile),
-    -- no push arrives — fall back to a standalone request if hints are missing.
-    local hints_inflight = false
-    local function request_hints_if_missing_impl()
-      if hints_inflight or not vim.api.nvim_buf_is_valid(bufnr) then
-        return
-      end
-      local existing = vim.api.nvim_buf_get_extmarks(bufnr, hint_ns, 0, -1, { limit = 1 })
-      if #existing > 0 then
-        return
-      end
-      hints_inflight = true
-      client:request("textDocument/inlayHint", {
-        textDocument = vim.lsp.util.make_text_document_params(bufnr),
-        range = {
-          start = { line = 0, character = 0 },
-          ["end"] = { line = vim.api.nvim_buf_line_count(bufnr), character = 0 },
-        },
-      }, function(err, result)
-        hints_inflight = false
-        if not err and result and vim.api.nvim_buf_is_valid(bufnr) then
-          apply_hints(result)
-        end
-      end, bufnr)
-    end
-    request_hints_if_missing = request_hints_if_missing_impl
   end
 
-  -- on_attach IS the client-ready signal. Register autocmds and fire initial
-  -- requests here directly — no vim.schedule needed.
-  local function request_if_stale()
-    if not vim.api.nvim_buf_is_valid(bufnr) or vim.fn.bufwinid(bufnr) == -1 then
-      return
-    end
-    local generation = _diagnostic_refresh_generation[client.id] or 0
-    if diagnostic_seen_refresh_generation ~= generation
-        and diagnostic_inflight_refresh_generation ~= generation then
-      vim.lsp.log.info("[jls] stale diagnostic activation pull buffer=" .. bufnr
-        .. " generation=" .. generation)
-      request_diagnostics()
-    end
-  end
+  vim.api.nvim_create_autocmd("TextChangedI", {
+    group = group,
+    buffer = bufnr,
+    callback = nudge_current_debounced,
+  })
+  vim.api.nvim_create_autocmd({"TextChanged", "InsertLeave", "BufWritePost"}, {
+    group = group,
+    buffer = bufnr,
+    callback = nudge_current,
+  })
 
-  local function client_ready()
-    vim.api.nvim_create_autocmd("TextChanged", {
-      group = group,
-      buffer = bufnr,
-      callback = request_diagnostics_after_typing,
-    })
-    vim.api.nvim_create_autocmd("TextChangedI", {
-      group = group,
-      buffer = bufnr,
-      callback = request_diagnostics_after_typing,
-    })
-    vim.api.nvim_create_autocmd("InsertLeave", {
-      group = group,
-      buffer = bufnr,
-      callback = request_diagnostics,
-    })
-    vim.api.nvim_create_autocmd("BufWritePost", {
-      group = group,
-      buffer = bufnr,
-      callback = request_diagnostics_after_typing,
-    })
-    vim.api.nvim_create_autocmd("BufEnter", {
-      group = group,
-      buffer = bufnr,
-      callback = function()
-        local win = vim.api.nvim_get_current_win()
-        if vim.api.nvim_win_get_config(win).relative ~= "" then
-          return
-        end
-        request_if_stale()
-      end,
-    })
-    vim.api.nvim_create_autocmd("WinEnter", {
-      group = group,
-      buffer = bufnr,
-      callback = request_if_stale,
-    })
-    -- Re-pull diagnostics when server signals background compile is done
-    vim.api.nvim_create_autocmd("User", {
-      group = group,
-      pattern = "JlsDiagnosticRefresh",
-      callback = function()
-        request_if_stale()
-      end,
-    })
-
-    if vim.fn.bufwinid(bufnr) ~= -1 then
-      vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(bufnr) then
-          request_diagnostics()
-        end
-      end)
-    end
-  end
-
-  client_ready()
-
-  -- Clean up timer and autocmds when jls detaches from this buffer.
   vim.api.nvim_create_autocmd("LspDetach", {
     group = group,
     buffer = bufnr,
@@ -679,15 +527,6 @@ function M.make_lsp_config(state, opts)
         if applier then
           vim.schedule(function() applier(result.hints) end)
         end
-      end,
-      ["workspace/diagnostic/refresh"] = function(_, _, ctx)
-        local client_id = ctx.client_id
-        _diagnostic_refresh_generation[client_id] = (_diagnostic_refresh_generation[client_id] or 0) + 1
-        vim.lsp.log.info("[jls] diagnostic refresh generation="
-          .. _diagnostic_refresh_generation[client_id] .. " client=" .. client_id)
-        -- Pull visible buffers now; hidden buffers pull once when entered.
-        vim.api.nvim_exec_autocmds("User", { pattern = "JlsDiagnosticRefresh" })
-        return vim.NIL
       end,
       ["java/renameFile"] = function(_, result, ctx)
         if not result or not result.oldPath or not result.newPath then
