@@ -158,7 +158,7 @@ local shown_server_messages = {}
 local recent_server_messages = {}
 local workspace_info = {}
 local pending_starts = {}
-local _inlay_hint_appliers = {} -- uri -> apply_hints function, set per-buffer in on_attach
+local _inlay_hint_appliers = {}
 
 -- Auto-restart backoff state, keyed by root_dir
 local auto_restart_attempts = {}
@@ -355,7 +355,12 @@ local function on_attach(bufnr, client, cfg)
   if not client or client.name ~= "jls" then
     return
   end
+  -- Suppress Neovim's built-in inlay hint pulling — the server pushes hints
+  -- via the custom java/inlayHints notification, scoped to the edit region.
   client.server_capabilities.inlayHintProvider = nil
+  -- Suppress Neovim's auto-pulling of folding ranges on every text change.
+  -- Folding still works via explicit commands (zc, zo, etc.) which trigger a one-off request.
+  client.server_capabilities.foldingRangeProvider = nil
 
   -- Patch exec_cmd to intercept java.pickAndGenerate before it is sent to the
   -- server, so we can show the picker and issue java.generateFields ourselves.
@@ -381,44 +386,21 @@ local function on_attach(bufnr, client, cfg)
     return
   end
 
-  -- Server pushes diagnostics via publishDiagnostics. Neovim's built-in handler
-  -- renders them. The client nudges the server to compile after typing pauses.
+  -- Server pushes diagnostics via publishDiagnostics after didChange (debounced
+  -- server-side). Neovim's built-in handler renders them. No client nudging needed.
 
-  local augroup = "JlsDiagnostics_" .. bufnr
+  local augroup = "JlsBuffer_" .. bufnr
   local group = vim.api.nvim_create_augroup(augroup, { clear = true })
-
-  local diagnostic_timer = vim.uv.new_timer()
-
-  local function nudge_current_debounced()
-    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-    diagnostic_timer:stop()
-    diagnostic_timer:start(200, 0, vim.schedule_wrap(function()
-      if not vim.api.nvim_buf_is_valid(bufnr) then return end
-      client:request("textDocument/diagnostic", {
-        textDocument = vim.lsp.util.make_text_document_params(bufnr),
-      }, function() end, bufnr)
-    end))
-  end
-
-  local function nudge_current()
-    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-    diagnostic_timer:stop()
-    -- The server compiles this file, then propagates diagnostics to any open
-    -- buffers that depend on it — no need to nudge other buffers from the client.
-    client:request("textDocument/diagnostic", {
-      textDocument = vim.lsp.util.make_text_document_params(bufnr),
-    }, function() end, bufnr)
-  end
 
   if cfg.inlay_hints and cfg.inlay_hints.enabled then
     local hint_ns = vim.api.nvim_create_namespace("jls_inlay_hints_" .. bufnr)
 
-    local function clear_hints()
-      vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, 0, -1)
-    end
-
-    local function apply_hints(hints)
-      clear_hints()
+    local function apply_hints(hints, range)
+      if range then
+        vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, range.startLine, range.endLine)
+      else
+        vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, 0, -1)
+      end
       for _, hint in ipairs(hints) do
         local label = hint.label
         if hint.paddingRight then
@@ -433,30 +415,14 @@ local function on_attach(bufnr, client, cfg)
       end
     end
 
-    local buf_uri = vim.uri_to_fname(vim.uri_from_bufnr(bufnr))
-    _inlay_hint_appliers[buf_uri] = apply_hints
+    _inlay_hint_appliers[vim.uri_to_fname(vim.uri_from_bufnr(bufnr))] = apply_hints
   end
-
-  vim.api.nvim_create_autocmd("TextChangedI", {
-    group = group,
-    buffer = bufnr,
-    callback = nudge_current_debounced,
-  })
-  vim.api.nvim_create_autocmd({"TextChanged", "InsertLeave", "BufWritePost"}, {
-    group = group,
-    buffer = bufnr,
-    callback = nudge_current,
-  })
 
   vim.api.nvim_create_autocmd("LspDetach", {
     group = group,
     buffer = bufnr,
     callback = function(ev)
       if ev.data.client_id == client.id then
-        if not diagnostic_timer:is_closing() then
-          diagnostic_timer:stop()
-          diagnostic_timer:close()
-        end
         _inlay_hint_appliers[vim.uri_to_fname(vim.uri_from_bufnr(bufnr))] = nil
         pcall(vim.api.nvim_del_augroup_by_name, augroup)
       end
@@ -525,7 +491,7 @@ function M.make_lsp_config(state, opts)
         local fname = vim.uri_to_fname(result.uri)
         local applier = _inlay_hint_appliers[fname]
         if applier then
-          vim.schedule(function() applier(result.hints) end)
+          vim.schedule(function() applier(result.hints, result.range) end)
         end
       end,
       ["java/renameFile"] = function(_, result, ctx)
