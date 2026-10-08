@@ -23,6 +23,20 @@ local function configure_external_source_buffer(bufnr)
   vim.bo[bufnr].filetype = "java"
 end
 
+local function redraw_diagnostics(bufnr)
+  if not bufnr or bufnr == 0 or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  if is_external_jls_source(bufnr) then
+    return
+  end
+  local client = vim.lsp.get_client_by_id(M._client_id)
+  if not client or not client.attached_buffers or not client.attached_buffers[bufnr] then
+    return
+  end
+  vim.diagnostic.show(nil, bufnr)
+end
+
 ---@param cfg JlsConfig|nil
 function M.setup_autocmds(cfg)
   if M._group then
@@ -50,6 +64,7 @@ function M.setup_autocmds(cfg)
     group = M._group,
     callback = function(ev)
       configure_external_source_buffer(ev.buf)
+      redraw_diagnostics(ev.buf)
     end,
   })
 end
