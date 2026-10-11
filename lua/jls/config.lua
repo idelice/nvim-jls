@@ -3,6 +3,7 @@
 ---@field root_markers string[]
 ---@field settings table
 ---@field inlay_hints { enabled: boolean }
+---@field rename_diff { enabled: boolean } Opt-in: route rename through a git-style diff preview that overrides your default rename keymap
 ---@field cmd_env table<string,string> Extra environment variables passed to the JLS process
 ---@field auto_restart boolean Automatically restart JLS if it crashes (up to 3 attempts with backoff)
 ---@field jvm_args string[]|nil Extra JVM args passed via JLS_JVM_OPTS (override default -Xmx2g -Xms512m)
@@ -37,6 +38,9 @@ function M.default()
     },
     settings = {},
     inlay_hints = {
+      enabled = false,
+    },
+    rename_diff = {
       enabled = false,
     },
     cmd_env = {},

@@ -71,6 +71,9 @@ require("jls").setup({
   inlay_hints = {
     enabled = false,             -- show parameter name hints at call sites
   },
+  rename_diff = {
+    enabled = false,             -- preview rename changes before applying (overrides your rename keymap)
+  },
   jvm_args = nil,                -- override JVM args (default: -Xmx2g -Xms512m ...)
   cmd_env = {},                  -- extra environment variables passed to the JLS process
   auto_restart = false,          -- automatically restart JLS if it crashes (up to 3 attempts with backoff)
@@ -158,6 +161,22 @@ When snacks.nvim is loaded, a multi-select picker opens (`<Tab>` to select, `<CR
 ## Rename
 
 Use the standard Neovim rename (`vim.lsp.buf.rename()`). When renaming a class, JLS also renames the source file on disk and notifies your file explorer (nvim-tree, neo-tree, mini.files, and snacks.nvim explorer are all supported) to refresh automatically.
+
+### Rename preview (opt-in)
+
+Enable a preview of every change before it is applied:
+
+```lua
+require("jls").setup({
+  rename_diff = { enabled = true },
+})
+```
+
+| Key | Action |
+|---|---|
+| `<CR>` | apply the rename |
+| `<Tab>` | jump to the change under the cursor |
+| `q` / `<Esc>` | cancel (nothing changes) |
 
 ## Debugging
 

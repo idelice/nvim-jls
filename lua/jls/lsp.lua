@@ -5,18 +5,8 @@ local util = require("jls.util")
 
 local M = {}
 
--- Pending params from a `java/renameFile` notification, consumed by the
--- `textDocument/rename` response handler to ensure the disk rename happens
--- AFTER the WorkspaceEdit is applied to all buffers.
--- Keyed by client_id to avoid cross-client interference in multi-root workspaces.
 local _pending_java_rename = {}
 
--- Run the picker and generate accessor methods.
--- Works for both the workspace/executeCommand response path (nvim ≤0.10)
--- and the exec_cmd patch path (nvim ≥0.11).
--- `client`  – the JLS client object
--- `className`, `methodKind` – from the pickFields payload
--- `fieldStr` – comma-separated list of field names
 local function pick_and_generate(client, className, methodKind, fieldStr)
   local fields = {}
   for f in tostring(fieldStr):gmatch("[^,]+") do
@@ -173,8 +163,10 @@ local function find_gradle_build_root(path)
   path = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
   local dir = path
   while dir and dir ~= "/" do
-    if vim.fn.filereadable(dir .. "/settings.gradle") == 1
-        or vim.fn.filereadable(dir .. "/settings.gradle.kts") == 1 then
+    if
+      vim.fn.filereadable(dir .. "/settings.gradle") == 1
+      or vim.fn.filereadable(dir .. "/settings.gradle.kts") == 1
+    then
       return dir
     end
     dir = vim.fn.fnamemodify(dir, ":h")
@@ -362,10 +354,6 @@ local function on_attach(bufnr, client, cfg)
   -- Folding still works via explicit commands (zc, zo, etc.) which trigger a one-off request.
   client.server_capabilities.foldingRangeProvider = nil
 
-  -- Patch exec_cmd to intercept java.pickAndGenerate before it is sent to the
-  -- server, so we can show the picker and issue java.generateFields ourselves.
-  -- exec_cmd provides its own callback to client:request, which would otherwise
-  -- swallow the server response without routing it through any handler.
   if not client._jls_exec_cmd_patched and type(client.exec_cmd) == "function" then
     client._jls_exec_cmd_patched = true
     local orig_exec_cmd = client.exec_cmd
@@ -386,9 +374,6 @@ local function on_attach(bufnr, client, cfg)
     return
   end
 
-  -- Server pushes diagnostics via publishDiagnostics after didChange (debounced
-  -- server-side). Neovim's built-in handler renders them. No client nudging needed.
-
   local augroup = "JlsBuffer_" .. bufnr
   local group = vim.api.nvim_create_augroup(augroup, { clear = true })
 
@@ -396,6 +381,9 @@ local function on_attach(bufnr, client, cfg)
     local hint_ns = vim.api.nvim_create_namespace("jls_inlay_hints_" .. bufnr)
 
     local function apply_hints(hints, range)
+      if not vim.api.nvim_buf_is_loaded(bufnr) then
+        return
+      end
       if range then
         vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, range.startLine, range.endLine)
       else
@@ -406,12 +394,24 @@ local function on_attach(bufnr, client, cfg)
         if hint.paddingRight then
           label = label .. " "
         end
-        local col = vim.lsp.util._get_line_byte_from_position(bufnr, hint.position, client.offset_encoding)
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, hint_ns, hint.position.line, col, {
-          virt_text = { { label, "LspInlayHint" } },
-          virt_text_pos = "inline",
-          hl_mode = "combine",
-        })
+        local line = vim.api.nvim_buf_get_lines(bufnr, hint.position.line, hint.position.line + 1, false)[1]
+        if line then
+          local col
+          if vim.fn.has("nvim-0.11") == 1 then
+            col = vim.str_byteindex(line, client.offset_encoding, hint.position.character, false)
+          elseif client.offset_encoding == "utf-8" then
+            col = math.min(hint.position.character, #line)
+          else
+            -- Neovim 0.10 has the earlier public str_byteindex signature.
+            local ok, byte = pcall(vim.str_byteindex, line, hint.position.character, client.offset_encoding == "utf-16")
+            col = ok and byte or #line
+          end
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, hint_ns, hint.position.line, col, {
+            virt_text = { { label, "LspInlayHint" } },
+            virt_text_pos = "inline",
+            hl_mode = "combine",
+          })
+        end
       end
     end
 
@@ -433,8 +433,7 @@ end
 retry_pending_starts = function()
   local waiting = false
   for bufnr, pending in pairs(pending_starts) do
-    if not vim.api.nvim_buf_is_valid(bufnr)
-        or vim.api.nvim_buf_get_name(bufnr) ~= pending.file then
+    if not vim.api.nvim_buf_is_valid(bufnr) or vim.api.nvim_buf_get_name(bufnr) ~= pending.file then
       pending_starts[bufnr] = nil
     else
       local client, client_pending = find_client(pending.root_dir, pending.file)
@@ -491,7 +490,9 @@ function M.make_lsp_config(state, opts)
         local fname = vim.uri_to_fname(result.uri)
         local applier = _inlay_hint_appliers[fname]
         if applier then
-          vim.schedule(function() applier(result.hints, result.range) end)
+          vim.schedule(function()
+            applier(result.hints, result.range)
+          end)
         end
       end,
       ["java/renameFile"] = function(_, result, ctx)
@@ -513,24 +514,11 @@ function M.make_lsp_config(state, opts)
         if not client then
           return
         end
-        vim.lsp.util.apply_workspace_edit(result, client.offset_encoding)
-        local pending = _pending_java_rename[ctx.client_id]
-        _pending_java_rename[ctx.client_id] = nil
-        vim.schedule(function()
-          if pending then
-            require("jls.commands").handle_rename_file(pending)
-          end
-          local changes = {}
-          for uri, _ in pairs(result.changes or {}) do
-            if pending and vim.uri_to_fname(uri) == pending.oldPath then
-              uri = vim.uri_from_fname(pending.newPath)
-            end
-            table.insert(changes, { uri = uri, type = 2 })
-          end
-          if #changes > 0 then
-            client:notify("java/renameApplied", { changes = changes })
-          end
-        end)
+        if cfg.rename_diff and cfg.rename_diff.enabled and require("jls.rename").can_show() then
+          require("jls.rename").show(result, ctx)
+          return
+        end
+        M.apply_rename_result(result, ctx)
       end,
     },
     on_attach = function(client, bufnr)
@@ -641,7 +629,7 @@ function M.start(state, opts, control)
 
   if fallback and not warned_roots[root_dir] then
     warned_roots[root_dir] = true
-    util.notify("JLS: root markers not found; using cwd: " .. root_dir, vim.log.levels.WARN)
+    util.notify("JLS: no build file found; running in single-file mode at " .. root_dir, vim.log.levels.INFO)
   end
 
   local ok, lspconfig = pcall(require, "lspconfig")
@@ -680,6 +668,34 @@ function M.start(state, opts, control)
     pcall(vim.api.nvim_del_augroup_by_id, group)
     util.notify("JLS: start timed out (no attach)", vim.log.levels.WARN)
   end, 30000)
+end
+
+---@param _state table
+---@param result table WorkspaceEdit from textDocument/rename
+---@param ctx table LSP handler ctx (needs client_id)
+function M.apply_rename_result(result, ctx)
+  local client = vim.lsp.get_client_by_id(ctx.client_id)
+  if not client then
+    return
+  end
+  vim.lsp.util.apply_workspace_edit(result, client.offset_encoding)
+  local pending = _pending_java_rename[ctx.client_id]
+  _pending_java_rename[ctx.client_id] = nil
+  vim.schedule(function()
+    if pending then
+      require("jls.commands").handle_rename_file(pending)
+    end
+    local changes = {}
+    for uri, _ in pairs(result.changes or {}) do
+      if pending and vim.uri_to_fname(uri) == pending.oldPath then
+        uri = vim.uri_from_fname(pending.newPath)
+      end
+      table.insert(changes, { uri = uri, type = 2 })
+    end
+    if #changes > 0 then
+      client:notify("java/renameApplied", { changes = changes })
+    end
+  end)
 end
 
 ---@param _state table

@@ -142,8 +142,7 @@ function M.update()
       util.notify("JLS: already up to date " .. tag, vim.log.levels.INFO)
       return
     end
-    local msg = current
-      and ("JLS: updating " .. current .. " → " .. tag .. " ...")
+    local msg = current and ("JLS: updating " .. current .. " → " .. tag .. " ...")
       or ("JLS: installing " .. tag .. " ...")
     util.notify(msg, vim.log.levels.INFO)
     installer.install(tag, function(install_err)

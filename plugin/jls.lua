@@ -8,7 +8,9 @@ vim.api.nvim_create_autocmd("LspAttach", {
   group = vim.api.nvim_create_augroup("JlsCommands", { clear = true }),
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
-    if not (client and client.name == "jls") then return end
+    if not (client and client.name == "jls") then
+      return
+    end
     if not vim.api.nvim_get_commands({})["JlsRestart"] then
       vim.api.nvim_create_user_command("JlsRestart", function()
         jls.restart()
@@ -21,7 +23,9 @@ vim.api.nvim_create_autocmd("LspDetach", {
   group = "JlsCommands",
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
-    if not (client and client.name == "jls") then return end
+    if not (client and client.name == "jls") then
+      return
+    end
     vim.schedule(function()
       if not jls_running() and vim.api.nvim_get_commands({})["JlsRestart"] then
         vim.api.nvim_del_user_command("JlsRestart")
@@ -54,9 +58,13 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
   callback = function()
     for _, client in ipairs(vim.lsp.get_clients({ name = "jls" })) do
       -- Force stop sends SIGTERM to the spawned process
-      pcall(function() client:stop(true) end)
+      pcall(function()
+        client:stop(true)
+      end)
     end
     -- Give the process a moment to die
-    vim.wait(100, function() return false end)
+    vim.wait(100, function()
+      return false
+    end)
   end,
 })

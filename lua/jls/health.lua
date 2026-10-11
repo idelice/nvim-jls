@@ -155,9 +155,9 @@ local function check_root(ctx)
   start("Workspace Root")
 
   if ctx.fallback then
-    warn("root markers not found; using cwd: " .. ctx.root, {
-      "Open a Java file inside a Maven/Gradle/Bazel project root, or extend `root_markers`.",
-    })
+    info("no build file found; single-file mode at " .. ctx.root)
+    info("JDK types and jars in the file's directory or a sibling lib/ resolve automatically.")
+    info("For a multi-module project, open a file inside a Maven/Gradle/Bazel root, or extend `root_markers`.")
   else
     local marker = ctx.marker and (" via " .. ctx.marker) or ""
     ok("resolved root: " .. ctx.root .. marker)
