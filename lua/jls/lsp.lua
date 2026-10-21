@@ -385,7 +385,7 @@ local function on_attach(bufnr, client, cfg)
         return
       end
       if range then
-        vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, range.startLine, range.endLine)
+        vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, range.startLine, range.endLine + 1)
       else
         vim.api.nvim_buf_clear_namespace(bufnr, hint_ns, 0, -1)
       end
@@ -402,7 +402,6 @@ local function on_attach(bufnr, client, cfg)
           elseif client.offset_encoding == "utf-8" then
             col = math.min(hint.position.character, #line)
           else
-            -- Neovim 0.10 has the earlier public str_byteindex signature.
             local ok, byte = pcall(vim.str_byteindex, line, hint.position.character, client.offset_encoding == "utf-16")
             col = ok and byte or #line
           end
