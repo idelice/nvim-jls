@@ -53,10 +53,16 @@ To remove a workspace's cache: run `:JlsClearCache` from any buffer in that proj
 
 ## Configuration
 
+Set `rich_formatter = { enabled = false }` to restore the previous diagnostic messages.
+Defaults to `{ enabled = true }` for readable summaries and javac rich explanations.
+
 ```lua
 require("jls").setup({
   jls_dir = nil,                 -- defaults to managed install (~/.local/share/nvim/jls); set to override
   settings = {},                 -- passed through to the JLS LSP settings payload
+  rich_formatter = {
+    enabled = true,              -- readable diagnostics; false restores previous messages
+  },
   root_markers = {
     "pom.xml",
     "build.gradle",
@@ -120,6 +126,10 @@ require("jls").setup({
   inlay_hints = { enabled = true },
 })
 ```
+
+Disabled by default. This option sets `settings.java.inlayHints` on the server
+and controls display in Neovim. When disabled, the server skips hint computation
+and sends no hint notifications. Restart JLS after changing it.
 
 Hints appear only for files in your workspace. JDK and dependency sources opened via go-to-definition are not annotated.
 

@@ -330,7 +330,11 @@ end
 ---@param cfg JlsConfig
 ---@return table
 local function build_settings(cfg)
-  return vim.deepcopy(cfg.settings or {})
+  local settings = vim.deepcopy(cfg.settings or {})
+  settings.java = settings.java or {}
+  settings.java.richFormatter = cfg.rich_formatter.enabled
+  settings.java.inlayHints = cfg.inlay_hints.enabled
+  return settings
 end
 
 ---@param bufnr integer

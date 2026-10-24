@@ -2,7 +2,8 @@
 ---@field jls_dir string|nil Path to JLS install root containing dist/ (defaults to managed install)
 ---@field root_markers string[]
 ---@field settings table
----@field inlay_hints { enabled: boolean }
+---@field rich_formatter { enabled: boolean } Readable diagnostics (default true)
+---@field inlay_hints { enabled: boolean } Compute and display parameter hints (default false)
 ---@field rename_diff { enabled: boolean } Opt-in: route rename through a git-style diff preview that overrides your default rename keymap
 ---@field cmd_env table<string,string> Extra environment variables passed to the JLS process
 ---@field auto_restart boolean Automatically restart JLS if it crashes (up to 3 attempts with backoff)
@@ -37,6 +38,9 @@ function M.default()
       ".git",
     },
     settings = {},
+    rich_formatter = {
+      enabled = true,
+    },
     inlay_hints = {
       enabled = false,
     },

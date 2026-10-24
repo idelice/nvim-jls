@@ -68,6 +68,9 @@ CONFIGURATION~
   require("jls").setup({
     jls_dir = nil,
     settings = {},
+    rich_formatter = {
+      enabled = true,
+    },
     root_markers = {
       "pom.xml",
       "build.gradle",
@@ -87,6 +90,9 @@ CONFIGURATION~
     auto_restart = false,
   })
 <
+
+rich_formatter defaults to { enabled = true } (readable diagnostics). Set
+{ enabled = false } for previous messages
 
 JVM memory defaults: -Xmx2g -Xms512m -XX:MaxHeapFreeRatio=50
 -XX:MinHeapFreeRatio=20 -XX:+UseStringDeduplication. Override via jvm_args:
@@ -129,6 +135,10 @@ Enable parameter name hints at call sites:
     inlay_hints = { enabled = true },
   })
 <
+
+Disabled by default. This option sets settings.java.inlayHints on the server
+and controls display in Neovim. When disabled, the server skips hint computation
+and sends no hint notifications. Restart JLS after changing it.
 
 Hints appear only for files in your workspace. JDK and dependency sources
 opened via go-to-definition are not annotated.
