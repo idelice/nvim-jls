@@ -18,14 +18,14 @@ function M.resolve_launcher(cfg)
       and "lang_server_windows.cmd"
       or "lang_server_" .. os_id .. ".sh"
 
-  -- Managed installs extract scripts to the root; source builds put them in dist/
+  -- Mason installs put scripts at the root; source builds put them in dist/
   local launcher = util.joinpath(jls_dir, filename)
   if vim.fn.filereadable(launcher) == 0 then
     launcher = util.joinpath(jls_dir, "dist", filename)
   end
 
   if vim.fn.filereadable(launcher) == 0 then
-    return nil, "JLS launcher not found in " .. jls_dir .. "\nRun :JlsInstall to download and install JLS."
+    return nil, "JLS launcher not found in " .. jls_dir .. "\nJLS not found. Install it with :MasonInstall jls or set jls_dir."
   end
 
   return launcher, nil

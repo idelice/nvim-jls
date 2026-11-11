@@ -26,7 +26,7 @@ JLS can run as a raw LSP server, but configuring it correctly is the hard part. 
 
 JLS starts automatically on `FileType=java` via a filetype plugin. `setup()` is only needed to override defaults.
 
-**Installation:** If you use [mason.nvim](https://github.com/mason-org/mason.nvim), install via `:MasonInstall jls` — the plugin detects and uses the mason path automatically. Without mason, run `:JlsInstall` once to download JLS to Neovim's data directory.
+**Installation:** JLS is installed via [mason.nvim](https://github.com/mason-org/mason.nvim). If JLS is missing, it is installed automatically via Mason when you open the first Java file; restart Neovim afterwards. You can also run `:MasonInstall jls` yourself, or set `jls_dir` to your own JLS install.
 
 > **Note for nvim-lspconfig users:** Do not call `require('lspconfig').jls.setup()` yourself — nvim-jls calls it internally with its own configuration. Doing so causes a conflict where either your settings or nvim-jls's features are silently dropped depending on load order.
 
@@ -36,19 +36,19 @@ This plugin writes to two locations on your machine:
 
 | What | Path |
 |---|---|
-| JLS binary | `stdpath("data")/jls/` — typically `~/.local/share/nvim/jls/` on Linux/macOS, `~/AppData/Local/nvim-data/jls/` on Windows |
+| JLS binary | `stdpath("data")/mason/packages/jls/` — typically `~/.local/share/nvim/mason/packages/jls/` on Linux/macOS, `~/AppData/Local/nvim-data/mason/packages/jls/` on Windows |
 | Workspace cache | `$XDG_CACHE_HOME/jls/<project>-<hash>/` — typically `~/.cache/jls/` on Linux/macOS |
 
-To remove the JLS binary: delete the directory manually.
-To remove a workspace's cache: run `:JlsClearCache` from any buffer in that project, or delete `~/.cache/jls/` manually.
+To remove the JLS binary: run `:MasonUninstall jls`.
+To remove a workspace's cache: run `:JlsClearCache` while JLS is running in that project, or delete `~/.cache/jls/` manually.
 
 ## Commands
 
-- `:JlsInstall [tag]` – download and install JLS (latest release by default; pass a tag like `v1.2.3` to pin a version)
-- `:JlsUpdate` – update JLS to the latest release
-- `:JlsRestart` – restart JLS (only available while JLS is running)
-- `:JlsLog` – open Neovim's LSP log in a read-only buffer
-- `:JlsClearCache` – delete this workspace's JLS disk cache
+- `:JlsRestart` – restart JLS if running, otherwise start it (available once JLS has started, survives server crashes)
+- `:JlsCompile` – compile the whole workspace and list errors/warnings (plus all diagnostics of open buffers) in a snacks picker (or quickfix) (only available while JLS is running)
+- `:JlsShowDiagnostics` – toggle the JLS diagnostics list (errors/warnings, and all diagnostics of open buffers) (only available while JLS is running)
+- `:JlsLog` – (only available while JLS is running) open Neovim's LSP log in a read-only buffer
+- `:JlsClearCache` – (only available while JLS is running) delete this workspace's JLS disk cache and restart JLS
 - `:checkhealth jls` – run the built-in health check
 
 ## Configuration
@@ -58,7 +58,7 @@ Defaults to `{ enabled = true }` for readable summaries and javac rich explanati
 
 ```lua
 require("jls").setup({
-  jls_dir = nil,                 -- defaults to managed install (~/.local/share/nvim/jls); set to override
+  jls_dir = nil,                 -- defaults to the Mason package path (~/.local/share/nvim/mason/packages/jls); set to override
   settings = {},                 -- passed through to the JLS LSP settings payload
   rich_formatter = {
     enabled = true,              -- readable diagnostics; false restores previous messages

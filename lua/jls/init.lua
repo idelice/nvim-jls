@@ -3,7 +3,6 @@ local util = require("jls.util")
 local client_mod = require("jls.client")
 local cache = require("jls.cache")
 local lsp = require("jls.lsp")
-local installer = require("jls.installer")
 
 ---@class JlsModule
 local M = {}
@@ -31,37 +30,77 @@ function M.make_lsp_config(opts)
   return lsp.make_lsp_config(state, opts)
 end
 
+local NOT_FOUND = "JLS not found. Install it with :MasonInstall jls or set jls_dir."
+local INSTALLED = "JLS installed via Mason. Restart Neovim to start it."
+
+local mason_installing = false
+
+local function install_with_mason(err)
+  if mason_installing then
+    return
+  end
+  local ok, registry = pcall(require, "mason-registry")
+  if not ok then
+    util.notify(NOT_FOUND .. " (mason.nvim is not installed)", vim.log.levels.ERROR)
+    return
+  end
+  mason_installing = true
+  local started, start_err = pcall(registry.refresh, function()
+    local ok_run, run_err = pcall(function()
+      if not registry.has_package("jls") then
+        mason_installing = false
+        util.notify(NOT_FOUND .. " (package `jls` not found in mason-registry)", vim.log.levels.ERROR)
+        return
+      end
+      local pkg = registry.get_package("jls")
+      if pkg:is_installed() then
+        mason_installing = false
+        util.notify(
+          err .. " (Mason package `jls` is installed but its launcher is missing — reinstall with :MasonInstall jls)",
+          vim.log.levels.ERROR
+        )
+        return
+      end
+      if pkg:is_installing() then
+        mason_installing = false
+        return
+      end
+      util.notify("JLS not found — installing latest jls via Mason...", vim.log.levels.INFO)
+      local handle = pkg:install()
+      handle:once(
+        "closed",
+        vim.schedule_wrap(function()
+          mason_installing = false
+          if pkg:is_installed() then
+            util.notify(INSTALLED, vim.log.levels.INFO)
+          else
+            util.notify(NOT_FOUND .. " (Mason install failed, see :Mason)", vim.log.levels.ERROR)
+          end
+        end)
+      )
+    end)
+    if not ok_run then
+      mason_installing = false
+      util.notify(NOT_FOUND .. " (" .. tostring(run_err) .. ")", vim.log.levels.ERROR)
+    end
+  end)
+  if not started then
+    mason_installing = false
+    util.notify(NOT_FOUND .. " (" .. tostring(start_err) .. ")", vim.log.levels.ERROR)
+  end
+end
+
 ---@param opts JlsConfig|nil
 function M.start(opts)
   local _, err = lsp.start(state, opts, { notify = true })
   if err then
     local cfg = config.merge(state.config, opts or {})
-    local is_managed = vim.fn.expand(cfg.jls_dir or "") == installer.managed_install_dir()
-    if is_managed and not installer.installed_version() then
-      M._auto_install_and_start(opts)
-    elseif is_managed then
-      util.notify(err, vim.log.levels.ERROR)
+    if vim.fn.expand(cfg.jls_dir or "") == config.mason_jls_dir() then
+      install_with_mason(err)
     else
-      util.notify(err .. "\nTip: run :JlsInstall to use the managed installation instead.", vim.log.levels.WARN)
+      util.notify(err, vim.log.levels.ERROR)
     end
   end
-end
-
-function M._auto_install_and_start(opts)
-  installer.latest_tag(function(fetch_err, tag)
-    if fetch_err or not tag then
-      util.notify("JLS: could not fetch latest release — " .. (fetch_err or "unknown"), vim.log.levels.ERROR)
-      return
-    end
-    util.notify("JLS: not installed — installing " .. tag .. " ...", vim.log.levels.INFO)
-    installer.install(tag, function(install_err)
-      if install_err then
-        util.notify("JLS: install failed — " .. install_err, vim.log.levels.ERROR)
-        return
-      end
-      M.start(opts)
-    end)
-  end)
 end
 
 function M.stop()
@@ -78,88 +117,24 @@ function M.log()
 end
 
 function M.clear_cache()
-  local path, err = cache.clear(state.config)
-  if err then
-    util.notify(err, vim.log.levels.ERROR)
+  local client = vim.lsp.get_clients({ name = "jls" })[1]
+  if not client then
+    util.notify("[jls] not running", vim.log.levels.WARN)
     return
   end
-  util.notify("Cleared JLS cache: " .. path)
-end
-
----Async: download and install the latest JLS release, or a specific version tag.
----@param version string|nil  e.g. "v1.2.3"; nil means latest
-function M.install(version)
-  if version then
-    -- Pin to exact requested tag
-    local current = installer.installed_version()
-    if current == version then
-      util.notify("JLS: already on version " .. version, vim.log.levels.INFO)
-      return
-    end
-    util.notify("JLS: installing " .. version .. " ...", vim.log.levels.INFO)
-    installer.install(version, function(install_err)
-      if install_err then
-        util.notify("JLS: install failed — " .. install_err, vim.log.levels.ERROR)
-        return
-      end
-      if vim.bo.filetype == "java" then
-        M.start()
-      end
-    end)
+  local root_dir = client.root_dir or (client.config and client.config.root_dir)
+  if not root_dir then
+    util.notify("Could not determine the JLS workspace root", vim.log.levels.ERROR)
     return
   end
-  installer.latest_tag(function(err, tag)
-    if err or not tag then
-      util.notify("JLS: could not fetch latest version — " .. (err or "unknown error"), vim.log.levels.ERROR)
-      return
+  lsp.restart(state, nil, { notify = true }, function()
+    local path, err = cache.clear(root_dir)
+    if err then
+      util.notify(err, vim.log.levels.ERROR)
+    else
+      util.notify("Cleared JLS cache: " .. path .. " — restarting JLS")
     end
-    local current = installer.installed_version()
-    if current == tag then
-      util.notify("JLS: already on latest version " .. tag, vim.log.levels.INFO)
-      return
-    end
-    installer.install(tag, function(install_err)
-      if install_err then
-        util.notify("JLS: install failed — " .. install_err, vim.log.levels.ERROR)
-        return
-      end
-      if vim.bo.filetype == "java" then
-        M.start()
-      end
-    end)
   end)
-end
-
----Async: update JLS to the latest release.
-function M.update()
-  installer.latest_tag(function(err, tag)
-    if err or not tag then
-      util.notify("JLS: could not fetch latest version — " .. (err or "unknown error"), vim.log.levels.ERROR)
-      return
-    end
-    local current = installer.installed_version()
-    if current == tag then
-      util.notify("JLS: already up to date " .. tag, vim.log.levels.INFO)
-      return
-    end
-    local msg = current and ("JLS: updating " .. current .. " → " .. tag .. " ...")
-      or ("JLS: installing " .. tag .. " ...")
-    util.notify(msg, vim.log.levels.INFO)
-    installer.install(tag, function(install_err)
-      if install_err then
-        util.notify("JLS: update failed — " .. install_err, vim.log.levels.ERROR)
-        return
-      end
-      if vim.bo.filetype == "java" then
-        M.start()
-      end
-    end)
-  end)
-end
-
----@return string|nil
-function M.installed_version()
-  return installer.installed_version()
 end
 
 ---@param args JlsConfig|nil

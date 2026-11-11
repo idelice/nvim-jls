@@ -717,8 +717,41 @@ end
 ---@param state table
 ---@param opts JlsConfig|nil
 ---@param control? { notify?: boolean }
-function M.restart(state, opts, control)
+function M.restart(state, opts, control, before_start)
   local target_bufnr = vim.api.nvim_get_current_buf()
+  if vim.bo[target_bufnr].filetype ~= "java" then
+    target_bufnr = nil
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].buflisted and vim.bo[b].filetype == "java" then
+        target_bufnr = b
+        break
+      end
+    end
+    if not target_bufnr then
+      util.notify("JLS: open a Java file to start it", vim.log.levels.WARN)
+      return
+    end
+  end
+
+  local function start_in_target()
+    if before_start then
+      local ok, berr = pcall(before_start)
+      if not ok then
+        util.notify(tostring(berr), vim.log.levels.ERROR)
+      end
+    end
+    vim.api.nvim_buf_call(target_bufnr, function()
+      local _, err = M.start(state, opts, control)
+      if err then
+        util.notify(err, vim.log.levels.ERROR)
+      end
+    end)
+  end
+
+  if #vim.lsp.get_clients({ name = "jls" }) == 0 then
+    start_in_target()
+    return
+  end
   M.stop(state)
 
   local attempts = 0
@@ -732,13 +765,8 @@ function M.restart(state, opts, control)
     end
 
     if vim.api.nvim_buf_is_valid(target_bufnr) then
-      vim.api.nvim_buf_call(target_bufnr, function()
-        M.start(state, opts, control)
-      end)
-      return
+      start_in_target()
     end
-
-    M.start(state, opts, control)
   end
 
   vim.defer_fn(restart_when_stopped, 100)

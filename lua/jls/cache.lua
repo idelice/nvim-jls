@@ -1,4 +1,3 @@
-local root_mod = require("jls.root")
 local util = require("jls.util")
 
 local M = {}
@@ -69,12 +68,11 @@ local function is_direct_child(parent, child)
   return vim.fs.dirname(child_norm) == parent_norm
 end
 
----@param cfg JlsConfig
+---@param root_dir string
 ---@return string|nil
 ---@return string|nil
-function M.clear(cfg)
-  local details = root_mod.resolve_root_details(nil, cfg)
-  local target, err = workspace_cache_dir(details.root_dir)
+function M.clear(root_dir)
+  local target, err = workspace_cache_dir(root_dir)
   if err then
     return nil, err
   end

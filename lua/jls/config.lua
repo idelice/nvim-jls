@@ -1,5 +1,5 @@
 ---@class JlsConfig
----@field jls_dir string|nil Path to JLS install root containing dist/ (defaults to managed install)
+---@field jls_dir string|nil Path to JLS install root containing dist/ (defaults to the Mason package path)
 ---@field root_markers string[]
 ---@field settings table
 ---@field rich_formatter { enabled: boolean } Readable diagnostics (default true)
@@ -9,23 +9,17 @@
 ---@field auto_restart boolean Automatically restart JLS if it crashes (up to 3 attempts with backoff)
 ---@field jvm_args string[]|nil Extra JVM args passed via JLS_JVM_OPTS (override default -Xmx2g -Xms512m)
 
-local installer = require("jls.installer")
-
 local M = {}
 
 ---@return string
-local function resolve_default_jls_dir()
-  local mason_path = vim.fn.stdpath("data") .. "/mason/packages/jls"
-  if vim.fn.isdirectory(mason_path) == 1 then
-    return mason_path
-  end
-  return installer.managed_install_dir()
+function M.mason_jls_dir()
+  return vim.fn.stdpath("data") .. "/mason/packages/jls"
 end
 
 ---@return JlsConfig
 function M.default()
   return {
-    jls_dir = resolve_default_jls_dir(),
+    jls_dir = M.mason_jls_dir(),
     root_markers = {
       "pom.xml",
       "build.gradle",

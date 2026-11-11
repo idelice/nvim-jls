@@ -1,6 +1,5 @@
 local cmd = require("jls.cmd")
 local config = require("jls.config")
-local installer = require("jls.installer")
 local lsp = require("jls.lsp")
 local root = require("jls.root")
 
@@ -110,29 +109,41 @@ end
 local function check_config(cfg, ctx)
   start("Configuration")
 
-  local managed_dir = installer.managed_install_dir()
-  local installed_ver = installer.installed_version()
-  local using_managed = cfg.jls_dir == managed_dir or cfg.jls_dir == vim.fn.expand(managed_dir)
+  local ok_mason, registry = pcall(require, "mason-registry")
+  local mason_dir = config.mason_jls_dir()
+  local using_mason = vim.fn.expand(cfg.jls_dir or "") == mason_dir
 
-  if installed_ver then
-    ok("managed install: " .. managed_dir .. " (version " .. installed_ver .. ")")
-  elseif using_managed then
-    warn("JLS is not installed", {
-      "Run :JlsInstall to download and install the latest release.",
+  local mason_installed = false
+  if ok_mason then
+    local q_ok, q = pcall(function()
+      return registry.has_package("jls") and registry.get_package("jls"):is_installed()
+    end)
+    if not q_ok then
+      info("could not query mason-registry")
+    end
+    mason_installed = q_ok and q or false
+  end
+
+  if not ok_mason then
+    info("mason.nvim not available")
+  elseif mason_installed then
+    local read_ok, receipt = pcall(vim.fn.readfile, mason_dir .. "/mason-receipt.json")
+    local decoded_ok, decoded = pcall(vim.json.decode, read_ok and table.concat(receipt, "\n") or "")
+    local source_id = decoded_ok and type(decoded) == "table" and decoded.source and decoded.source.id
+    ok("Mason package `jls` is installed" .. (source_id and (" (" .. source_id .. ")") or ""))
+  elseif using_mason then
+    warn("Mason package `jls` is not installed", {
+      "Install it with :MasonInstall jls, or set jls_dir.",
     })
   else
-    info("managed install not in use (jls_dir is user-configured)")
+    info("Mason package `jls` is not installed")
   end
 
   if cfg.jls_dir and cfg.jls_dir ~= "" then
-    if using_managed then
-      ok("jls_dir: " .. cfg.jls_dir .. " (managed)")
-    else
-      ok("jls_dir: " .. cfg.jls_dir .. " (user-configured)")
-    end
+    ok("jls_dir: " .. cfg.jls_dir .. (using_mason and " (Mason default)" or " (user-configured)"))
   else
     err("jls_dir is not set", {
-      'Run :JlsInstall, or configure `require("jls").setup({ jls_dir = "/path/to/jls" })`.',
+      'Install it with :MasonInstall jls, or configure `require("jls").setup({ jls_dir = "/path/to/jls" })`.',
     })
   end
 
