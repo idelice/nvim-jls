@@ -54,12 +54,13 @@ COMMANDS~
 
 :JlsRestart     Restart JLS if running, otherwise start it. Available once JLS has
                 started (survives server crashes).
-:JlsCompile     Compile the whole workspace; errors/warnings open in a snacks
-                picker or quickfix. Only available while JLS is running.
-:JlsShowDiagnostics
-                Toggle the JLS diagnostics list (errors/warnings, and all
-                diagnostics of open buffers). Only available while JLS is
+:JlsCompile     Compile the whole workspace and show its errors and warnings in
+                a picker (snacks, or quickfix). Only available while JLS is
                 running.
+:JlsShowDiagnostics
+                Toggle the diagnostics list: errors and warnings from all
+                files, plus everything from open buffers. Only available while
+                JLS is running.
 :JlsLog         Open Neovim's LSP log in a read-only buffer. Only available
                 while JLS is running.
 :JlsClearCache  Delete this workspace's JLS disk cache and restart JLS. Only

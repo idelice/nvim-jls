@@ -45,8 +45,8 @@ To remove a workspace's cache: run `:JlsClearCache` while JLS is running in that
 ## Commands
 
 - `:JlsRestart` – restart JLS if running, otherwise start it (available once JLS has started, survives server crashes)
-- `:JlsCompile` – compile the whole workspace and list errors/warnings (plus all diagnostics of open buffers) in a snacks picker (or quickfix) (only available while JLS is running)
-- `:JlsShowDiagnostics` – toggle the JLS diagnostics list (errors/warnings, and all diagnostics of open buffers) (only available while JLS is running)
+- `:JlsCompile` – compile the whole workspace and show its errors and warnings in a picker (snacks, or quickfix) (only available while JLS is running)
+- `:JlsShowDiagnostics` – toggle the diagnostics list: errors and warnings from all files, plus everything from open buffers (only available while JLS is running)
 - `:JlsLog` – (only available while JLS is running) open Neovim's LSP log in a read-only buffer
 - `:JlsClearCache` – (only available while JLS is running) delete this workspace's JLS disk cache and restart JLS
 - `:checkhealth jls` – run the built-in health check
